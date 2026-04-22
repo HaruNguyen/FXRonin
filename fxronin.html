@@ -1,0 +1,2791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>⛩ FXRonin — Crypto Trade Setup Generator</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #0B0E11; color: #EAECEF; font-family: 'Share Tech Mono', monospace; -webkit-font-smoothing: antialiased; }
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0B0E11; } ::-webkit-scrollbar-thumb { background: #252B33; border-radius: 3px; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+  #err { display:none; color:#EF5350; background:#13171C; border:1px solid #EF5350; border-radius:8px; padding:16px; margin:20px; font-size:13px; white-space:pre-wrap; font-family:monospace; }
+</style>
+</head>
+<body>
+<div id="err"></div>
+<div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#F0B90B;font-family:'Share Tech Mono',monospace;font-size:14px;">⛩ FXRonin đang tải...</div></div>
+<script>
+window.addEventListener('error', function(e) {
+  var src = e.filename || '';
+  if (src.startsWith('chrome-extension://') || src.startsWith('moz-extension://') || src.startsWith('safari-extension://')) return;
+  var el = document.getElementById('err');
+  el.style.display = 'block';
+  el.textContent = '\u274C Runtime Error:\n' + e.message + (e.lineno ? '\nLine: ' + e.lineno : '');
+});
+</script>
+<script type="text/babel" data-presets="react">
+// React hooks from UMD global (browser-compatible, no require/import needed)
+const { useState, useRef, useEffect, useCallback } = React;
+
+const C = {
+  bull: "#0ECB81", bear: "#F6465D", gold: "#F0B90B",
+  bg: "#0B0E11", card: "#13171C", card2: "#1A1F26",
+  border: "#252B33", mid: "#848E9C", text: "#E8EAED",
+  purple: "#C084FC", blue: "#38BDF8",
+};
+
+const TOP_COINS = ["BTC","ETH","BNB","SOL","XRP","DOGE","ADA","AVAX","LINK","DOT","ARB","OP","SUI","APT","NEAR","LTC","BCH","ATOM","UNI","MATIC"];
+
+// ─── STORAGE  (window.storage → localStorage fallback) ───────────────────────
+async function storeGet(k) {
+  // 1) Try Binance MiniApp storage first
+  try {
+    const r = await window.storage.get(k);
+    if (r && r.value != null) return JSON.parse(r.value);
+  } catch {}
+  // 2) Fallback: localStorage (persists across reloads)
+  try {
+    const v = localStorage.getItem("fxr_" + k);
+    return v ? JSON.parse(v) : null;
+  } catch { return null; }
+}
+async function storeSet(k, v) {
+  const json = JSON.stringify(v);
+  // Write to both so whichever layer works, data is safe
+  try { await window.storage.set(k, json); } catch {}
+  try { localStorage.setItem("fxr_" + k, json); } catch {}
+}
+const todayKey = () => {
+  const n = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+  return `trades_${n.getFullYear()}_${n.getMonth()}_${n.getDate()}`;
+};
+const vnTime = () => new Intl.DateTimeFormat("vi-VN", {
+  timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit"
+}).format(new Date());
+const vnHour = () => {
+  try {
+    const s = new Intl.DateTimeFormat("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", hour12: false }).format(new Date());
+    return parseInt(s.replace(/\D/g, "")) || new Date().getHours();
+  } catch { return new Date().getHours(); }
+};
+function toBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = rej; r.readAsDataURL(file);
+  });
+}
+
+// ─── CLIPBOARD — iOS compatible ───────────────────────────────────────────────
+function copyToClipboard(text) {
+  // Method 1: Modern API
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).then(() => true).catch(() => fallbackCopy(text));
+  }
+  return Promise.resolve(fallbackCopy(text));
+}
+
+function fallbackCopy(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, 99999);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch { return false; }
+}
+
+// ─── BINANCE FUTURES API ─────────────────────────────────────────────────────
+async function hmacSha256(secret, message) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw", enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Try multiple Binance base URLs (MiniApp may whitelist some but not others)
+const BNBASE = ["https://fapi.binance.com", "https://api.binance.com"];
+
+// Public GET — tries fapi first, falls back to api.binance.com equivalent
+async function binancePublic(fapiPath, params = {}) {
+  // Map fapi paths to api equivalents where possible
+  const apiPathMap = {
+    "/fapi/v1/ping":        "/api/v3/ping",
+    "/fapi/v1/time":        "/api/v3/time",
+    "/fapi/v1/ticker/24hr": "/api/v3/ticker/24hr",
+  };
+  const bases = [
+    { base: "https://fapi.binance.com", path: fapiPath },
+    { base: "https://api.binance.com",  path: apiPathMap[fapiPath] || fapiPath },
+    { base: "https://api3.binance.com", path: apiPathMap[fapiPath] || fapiPath },
+  ].filter(b => b.path);
+
+  for (const { base, path } of bases) {
+    try {
+      const res  = await fetch(`${base}${path}?${new URLSearchParams(params)}`);
+      const data = await res.json();
+      if (res.ok) return data;
+    } catch { /* try next */ }
+  }
+  throw new Error("NETWORK_ERROR");
+}
+
+// Signed endpoint — tries fapi.binance.com with auth header
+async function binanceFutures(path, params = {}, apiKey, secret) {
+  const qs  = new URLSearchParams({ ...params, timestamp: Date.now(), recvWindow: 6000 }).toString();
+  const sig = await hmacSha256(secret, qs);
+  let res;
+  try {
+    res = await fetch(`https://fapi.binance.com${path}?${qs}&signature=${sig}`, {
+      headers: { "X-MBX-APIKEY": apiKey },
+    });
+  } catch {
+    throw new Error("CORS_BLOCKED");
+  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.msg || `HTTP ${res.status}`);
+  return data;
+}
+
+// Validate API key format locally (no network needed)
+function validateKeyFormat(k, s) {
+  if (!k || k.length < 32) return "API Key quá ngắn";
+  if (!s || s.length < 32) return "Secret quá ngắn";
+  if (!/^[A-Za-z0-9]+$/.test(k)) return "API Key chứa ký tự không hợp lệ";
+  return null; // valid
+}
+
+// ─── PRICE FETCH — WebSocket (no CORS) → REST → CoinGecko ───────────────────
+
+// Method 1: Binance WebSocket stream — bypasses CORS entirely
+function fetchPriceFromBinanceWS(symbol) {
+  return new Promise((resolve, reject) => {
+    const sym = symbol.toLowerCase().replace(/usdt$/, "") + "usdt";
+    let ws;
+    try { ws = new WebSocket(`wss://stream.binance.com:9443/ws/${sym}@ticker`); }
+    catch { return reject(new Error("WS unsupported")); }
+    const t = setTimeout(() => { try { ws.close(); } catch {} reject(new Error("WS timeout")); }, 7000);
+    ws.onmessage = (e) => {
+      clearTimeout(t);
+      try { ws.close(); } catch {}
+      try {
+        const d = JSON.parse(e.data);
+        const price = parseFloat(d.c || 0);
+        if (price === 0) return reject(new Error("WS price=0"));
+        resolve({ price, change24h: parseFloat(d.P || 0), vol24h: parseFloat(d.q || 0), oi: 0, funding: 0, source: "Binance WS" });
+      } catch { reject(new Error("WS parse")); }
+    };
+    ws.onerror = () => { clearTimeout(t); try { ws.close(); } catch {} reject(new Error("WS error")); };
+  });
+}
+
+// Method 2: Binance simple ticker (lightest REST endpoint, good CORS support)
+async function fetchPriceFromBinanceSimple(symbol) {
+  const sym = symbol.toUpperCase().replace(/USDT$/, "") + "USDT";
+  // Try spot simple price first (most CORS-friendly)
+  const endpoints = [
+    `https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}`,
+    `https://api3.binance.com/api/v3/ticker/24hr?symbol=${sym}`,
+    `https://data-api.binance.vision/api/v3/ticker/24hr?symbol=${sym}`,
+  ];
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, { mode: "cors" });
+      if (!res.ok) continue;
+      const d = await res.json();
+      const price = parseFloat(d.lastPrice || 0);
+      if (price > 0) return { price, change24h: parseFloat(d.priceChangePercent || 0), vol24h: parseFloat(d.quoteVolume || 0), oi: 0, funding: 0, source: "Binance REST" };
+    } catch {}
+  }
+  return null;
+}
+
+// Method 3: CoinGecko REST (CORS-friendly, free)
+const COINGECKO_IDS = {
+  BTC:"bitcoin", ETH:"ethereum", BNB:"binancecoin", SOL:"solana",
+  XRP:"ripple", DOGE:"dogecoin", ADA:"cardano", AVAX:"avalanche-2",
+  LINK:"chainlink", DOT:"polkadot", ARB:"arbitrum", OP:"optimism",
+  SUI:"sui", APT:"aptos", NEAR:"near", LTC:"litecoin",
+  BCH:"bitcoin-cash", ATOM:"cosmos", UNI:"uniswap", MATIC:"matic-network",
+};
+async function fetchPriceFromCoinGecko(symbol) {
+  const base = symbol.toUpperCase().replace(/USDT$/, "");
+  const id = COINGECKO_IDS[base];
+  if (!id) return null;
+  const res = await fetch(
+    `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true`,
+    { headers: { "Accept": "application/json" } }
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  const coin = data[id];
+  if (!coin || !coin.usd) return null;
+  return { price: coin.usd, change24h: coin.usd_24h_change || 0, vol24h: coin.usd_24h_vol || 0, oi: 0, funding: 0, source: "CoinGecko" };
+}
+
+// Method 4: Coinbase spot price (excellent CORS support)
+async function fetchPriceFromCoinbase(symbol) {
+  const base = symbol.toUpperCase().replace(/USDT$/, "");
+  try {
+    const res = await fetch(`https://api.coinbase.com/v2/prices/${base}-USD/spot`);
+    if (!res.ok) return null;
+    const d = await res.json();
+    const price = parseFloat(d?.data?.amount || 0);
+    if (price <= 0) return null;
+    return { price, change24h: 0, vol24h: 0, oi: 0, funding: 0, source: "Coinbase" };
+  } catch { return null; }
+}
+
+// Method 5: Kraken ticker (open CORS)
+async function fetchPriceFromKraken(symbol) {
+  const base = symbol.toUpperCase().replace(/USDT$/, "");
+  const pair = base === "BTC" ? "XBTUSD" : base + "USD";
+  try {
+    const res = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`);
+    if (!res.ok) return null;
+    const d = await res.json();
+    const result = d?.result?.[Object.keys(d.result || {})[0]];
+    if (!result) return null;
+    const price = parseFloat(result.c?.[0] || 0);
+    if (price <= 0) return null;
+    return { price, change24h: 0, vol24h: 0, oi: 0, funding: 0, source: "Kraken" };
+  } catch { return null; }
+}
+
+// Fetch live price: 5 sources race in parallel, first valid price wins
+async function fetchMarketData(symbol) {
+  const results = await Promise.allSettled([
+    fetchPriceFromBinanceWS(symbol),
+    fetchPriceFromBinanceSimple(symbol),
+    fetchPriceFromCoinGecko(symbol),
+    fetchPriceFromCoinbase(symbol),
+    fetchPriceFromKraken(symbol),
+  ]);
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value && r.value.price > 0) {
+      // Best-effort: supplement OI + funding from Binance futures
+      try {
+        const sym = symbol.toUpperCase().replace(/USDT$/, "") + "USDT";
+        const [oi, funding] = await Promise.allSettled([
+          fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${sym}`).then(r=>r.json()),
+          fetch(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${sym}&limit=1`).then(r=>r.json()),
+        ]);
+        return {
+          ...r.value,
+          oi:      parseFloat((oi.value || {}).openInterest || 0),
+          funding: parseFloat(((funding.value || [])[0] || {}).fundingRate || 0),
+        };
+      } catch {}
+      return r.value;
+    }
+  }
+  return { price: 0, change24h: 0, vol24h: 0, oi: 0, funding: 0, source: "none" };
+}
+
+// Midnight VN time as unix ms
+function todayStartMs() {
+  const n = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+  n.setHours(0, 0, 0, 0);
+  return n.getTime();
+}
+
+// ─── ANTHROPIC KEY HELPER ────────────────────────────────────────────────────
+function getAnthropicKey() {
+  try { return localStorage.getItem("fxr_anthropic_key") || ""; } catch { return ""; }
+}
+function anthropicHeaders() {
+  const k = getAnthropicKey();
+  return {
+    "Content-Type": "application/json",
+    "anthropic-version": "2023-06-01",
+    "anthropic-dangerous-direct-browser-access": "true",
+    ...(k ? { "x-api-key": k } : {}),
+  };
+}
+
+// ─── API: WEB SEARCH → TEXT ───────────────────────────────────────────────────
+async function callWithSearch(userMsg, systemPrompt) {
+  const messages = [{ role: "user", content: userMsg }];
+  for (let round = 0; round < 5; round++) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: anthropicHeaders(),
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1000,
+        system: systemPrompt || "",
+        messages,
+        tools: [{ type: "web_search_20250305", name: "web_search" }],
+      }),
+    });
+    if (!res.ok) throw new Error(`API ${res.status}`);
+    const data = await res.json();
+    const textBlocks = (data.content || []).filter(b => b.type === "text");
+    const toolUseBlocks = (data.content || []).filter(b => b.type === "tool_use");
+    if (toolUseBlocks.length === 0 || data.stop_reason === "end_turn") {
+      return textBlocks.map(b => b.text).join("").trim();
+    }
+    messages.push({ role: "assistant", content: data.content });
+    const toolResults = toolUseBlocks.map(tu => ({
+      type: "tool_result", tool_use_id: tu.id,
+      content: "Search done. Use the information you found.",
+    }));
+    messages.push({ role: "user", content: toolResults });
+  }
+  return "";
+}
+
+// ─── API: STREAM POST ─────────────────────────────────────────────────────────
+async function streamWrite(userMsg, systemPrompt, onChunk) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: anthropicHeaders(),
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1000,
+      system: systemPrompt || "",
+      messages: [{ role: "user", content: userMsg }],
+      stream: true,
+    }),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let full = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    for (const line of dec.decode(value).split("\n")) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const d = JSON.parse(line.slice(6));
+        if (d.type === "content_block_delta" && d.delta?.type === "text_delta") {
+          full += d.delta.text;
+          // Strip markdown formatting as it streams — keep output clean for Binance Square
+          const clean = full.replace(/\*\*/g, "").replace(/\*/g, "").replace(/^#{1,3}\s/gm, "").replace(/`/g, "");
+          onChunk?.(clean);
+        }
+      } catch {}
+    }
+  }
+  return full.replace(/\*\*/g, "").replace(/\*/g, "").replace(/^#{1,3}\s/gm, "").replace(/`/g, "");
+}
+
+// ─── API: IMAGE ANALYSIS STREAM ───────────────────────────────────────────────
+async function streamImages(contentBlocks, systemPrompt, onChunk) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: anthropicHeaders(),
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1000,
+      system: systemPrompt || "",
+      messages: [{ role: "user", content: contentBlocks }],
+      stream: true,
+    }),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let full = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    for (const line of dec.decode(value).split("\n")) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const d = JSON.parse(line.slice(6));
+        if (d.type === "content_block_delta" && d.delta?.type === "text_delta") {
+          full += d.delta.text; onChunk?.(full);
+        }
+      } catch {}
+    }
+  }
+  return full;
+}
+
+// ─── GENERATE SETUP POST ──────────────────────────────────────────────────────
+// tradeType: "swing" (top coins, 4H/1D) | "meme" (low-cap/manual, 15m/1H)
+async function generateSetupPost(token, onStatus, onChunk, tradeType = "swing") {
+  const systemPrompt = tradeType === "meme" ? MEME_SYSTEM : SWING_SYSTEM;
+  const typeLabel    = tradeType === "meme" ? "⚡ LOW-CAP" : "📈 SWING";
+
+  // Step 1: Fetch live price — 5 sources race in parallel
+  let marketData = "";
+  let livePrice = 0;
+  onStatus(`📡 ${typeLabel} · Fetching $${token} price...`);
+  try {
+    const d = await fetchMarketData(token);
+    if (d.price > 0) {
+      livePrice = d.price;
+      const fmtVol = d.vol24h >= 1e9 ? `$${(d.vol24h/1e9).toFixed(2)}B`
+                   : d.vol24h >= 1e6 ? `$${(d.vol24h/1e6).toFixed(1)}M`
+                   : d.vol24h > 0    ? `$${d.vol24h.toFixed(0)}`         : "N/A";
+      const fmtOI  = d.oi >= 1e9    ? `$${(d.oi/1e9).toFixed(2)}B`
+                   : d.oi >= 1e6    ? `$${(d.oi/1e6).toFixed(1)}M`
+                   : d.oi > 0       ? `${d.oi.toFixed(0)}`               : "N/A";
+      const fundStr = d.funding !== 0 ? ` | Funding: ${(d.funding * 100).toFixed(4)}%` : "";
+      // Signal quality hints for the AI
+      const volSignal  = d.vol24h > 5e8  ? "HIGH"   : d.vol24h > 1e8 ? "MODERATE" : "LOW";
+      const trendStr   = Math.abs(d.change24h) > 5 ? "STRONG" : Math.abs(d.change24h) > 2 ? "MODERATE" : "WEAK";
+      marketData = `${token}USDT — Price: $${d.price.toLocaleString()} | 24h: ${d.change24h >= 0 ? "+" : ""}${d.change24h.toFixed(2)}% (${trendStr} trend) | Vol: ${fmtVol} (${volSignal} volume) | OI: ${fmtOI}${fundStr} | Source: ${d.source}`;
+      onStatus(`✅ $${token} = $${d.price.toLocaleString()} · ${trendStr} trend · ${volSignal} vol`);
+    } else {
+      onStatus(`⚠️ $${token}: price unavailable — AI will estimate`);
+    }
+  } catch {
+    onStatus(`⚠️ $${token}: fetch error — AI will estimate`);
+  }
+
+  // Step 2: Pre-calculate levels + write post
+  onStatus(`✍️ ${typeLabel} · Analyzing $${token}...`);
+  const now = new Date().toUTCString();
+  const levelsBlock = livePrice > 0 ? calcLevels(livePrice, tradeType) : null;
+
+  const tradeContext = tradeType === "meme"
+    ? `Trade type: LOW-CAP/MEME — SL tight 7%, R:R min 1:3, TF 15m–1H, LEV 3–5x max, partial TP.`
+    : `Trade type: SWING — TF 4H/1D, R:R min 1:2, MA confluence required, LEV 5–10x max.`;
+
+  const prompt = livePrice > 0
+    ? `=== REAL-TIME MARKET DATA (fetched ${now}) ===
+${marketData}
+
+${levelsBlock}
+
+${tradeContext}
+
+⚠️ CRITICAL: Use the PRE-CALCULATED LEVELS above exactly as-is. Copy the LONG or SHORT set depending on your bias decision. Do NOT invent different numbers. Do NOT use placeholders like "Approximate zone".
+
+Write the complete FXRonin trade setup post for $${token}USDT.`
+    : `${tradeContext}
+Write a FXRonin trade setup for $${token}USDT. Estimate a realistic current price from your knowledge and calculate ENTRY/TP/SL from it. Output real numbers only — no placeholders.`;
+
+  return await streamWrite(prompt, systemPrompt, onChunk);
+}
+
+// ─── SYSTEM PROMPTS (v6 — compact + RONIN_SIGN) ──────────────────────────────
+const RONIN_SIGN = `━━━━━━━━━━━━━━━━━━━━
+⛩ FXRONIN — THE WAY OF DISCIPLINE
+"Cut losses with honor. Discipline is the blade."
+Not financial advice. Manage your own risk.`;
+
+// ─── SWING SYSTEM — Top 100, liquid coins, 4H/1D ─────────────────────────────
+const SWING_SYSTEM = `You are FXRonin — swing trader. Binance Square post. Sharp, no hashtags, no fluff.
+
+⚫ FORMAT RULES — CRITICAL:
+- Plain text ONLY. Zero markdown. No ** bold **, no * italic *, no # headers, no backticks.
+- Never break character. Never explain your reasoning. Never ask for more data. Never write disclaimers.
+- If live price is missing, estimate from your knowledge and write the full setup as normal. Do NOT mention that price data is unavailable.
+- Always output a complete, ready-to-post trade setup. No meta-commentary.
+
+🔴 PRICE RULE: ENTRY must be within ±2% of the live price in the user message. Never use training data prices.
+
+SWING TRADE RULES (apply strictly):
+- Timeframe: 4H or 1D only. Never scalp top coins.
+- LONG only when: 24h change > 0% AND price holding key support AND volume expanding.
+- SHORT only when: 24h change < 0% AND price breaking structure AND volume confirms.
+- Minimum R:R: 1:2. If structure doesn't allow 1:2, lower confidence below 60%.
+- Use MA7/MA25 confluence: entry near MA = stronger signal (+confidence).
+- OI growing + volume spike = high conviction. Funding extreme = contrarian signal.
+
+CONFIDENCE CALIBRATION:
+- Strong trend (24h >3%) + vol spike + OI up → 75–88%
+- Moderate trend + decent vol → 62–74%
+- Choppy / low vol / unclear structure → 50–62% MAX
+- Never output >88% — markets are uncertain.
+
+STRICT FORMAT (max 12 lines):
+
+$TOKEN | ONE-LINE TITLE  [SWING]
+
+[ 🟢 BULLISH ] or [ 🔴 BEARISH ] — CONF: XX%
+
+• BIAS     : LONG / SHORT
+• ENTRY    : price zone
+• TP       : tp1 / tp2 / tp3
+• SL       : stop loss
+• R:R      : e.g. 1:2
+• TF       : 4H / 1D
+• LEV      : 5x–10x max (swing)
+
+🚩 EDGE: MA confluence + volume/OI read in 1 sentence.
+🚩 TRIGGER: exact candle close condition to enter.
+
+${RONIN_SIGN}`;
+
+// ─── MEME/LOW-CAP SYSTEM — manual scan, high volatility ──────────────────────
+const MEME_SYSTEM = `You are FXRonin — high-volatility specialist. Binance Square post. Sharp, no hashtags.
+
+⚫ FORMAT RULES — CRITICAL:
+- Plain text ONLY. Zero markdown. No ** bold **, no * italic *, no # headers, no backticks.
+- Never break character. Never ask for more data. Never write warnings or disclaimers.
+- If live price is missing, use your best market knowledge to estimate it and write the full setup. Do NOT mention missing data.
+- Always output a complete, ready-to-post trade setup. No meta-commentary. No "structure template only" language.
+
+🔴 PRICE RULE: ENTRY must be within ±2% of the live price in the user message. Never use training data prices.
+
+LOW-CAP / MEME TRADE RULES (apply strictly):
+- Timeframe: 15m–1H for entry, 4H for trend direction.
+- KEY SIGNAL: sudden volume spike (3–5x normal) = primary trigger.
+- Look for: tight consolidation breakout, liquidity sweep then reversal, social catalyst.
+- SL MUST be tight: 5–8% max from entry. Meme coins reverse fast.
+- Minimum R:R: 1:3. High risk requires high reward or skip.
+- Partial TP strategy: take 40% at TP1, 35% at TP2, hold 25% to TP3.
+- LEV: 3x–5x max — low cap = high volatility, over-leveraging = liquidation.
+
+CONFIDENCE CALIBRATION:
+- Volume spike + clear breakout + catalyst → 70–82%
+- Volume spike only (no catalyst) → 58–68%
+- No volume confirmation → 50–58% MAX — note it clearly.
+- No fundamental catalyst → cap at 70% maximum.
+
+STRICT FORMAT (max 12 lines):
+
+$TOKEN | ONE-LINE TITLE  [⚡ HIGH RISK]
+
+[ 🟢 BULLISH ] or [ 🔴 BEARISH ] — CONF: XX%
+
+• BIAS     : LONG / SHORT
+• ENTRY    : price zone
+• TP       : tp1 / tp2 / tp3  (partial exit each)
+• SL       : stop loss (tight — 5–8%)
+• R:R      : e.g. 1:3
+• TF       : 15m / 1H
+• LEV      : 3x–5x max
+
+🚩 EDGE: volume spike or breakout catalyst in 1 sentence.
+🚩 TRIGGER: exact condition — close above/below key level with volume.
+
+${RONIN_SIGN}`;
+
+// Legacy alias (used by other parts)
+const SETUP_SYSTEM = SWING_SYSTEM;
+
+// ─── PRE-CALCULATE TRADE LEVELS FROM LIVE PRICE ───────────────────────────────
+// Returns formatted ENTRY / TP1-3 / SL / R:R for both LONG and SHORT
+// so the AI has exact numbers to copy — no placeholders
+function calcLevels(price, tradeType = "swing") {
+  if (!price || price <= 0) return null;
+
+  // Smart decimal formatting based on price magnitude
+  const dp = price >= 10000 ? 0
+           : price >= 1000  ? 1
+           : price >= 100   ? 2
+           : price >= 1     ? 4
+           : price >= 0.1   ? 5
+           : price >= 0.01  ? 6
+           :                   8;
+  const fmt = v => v.toFixed(dp);
+
+  // Risk % per trade type
+  const slPct    = tradeType === "meme" ? 0.07  : 0.08;  // 7% meme, 8% swing
+  const entryPct = tradeType === "meme" ? 0.01  : 0.015; // ±1% meme, ±1.5% swing
+
+  // TP ratios (multiplier of SL distance for R:R)
+  const tp1R = tradeType === "meme" ? 2.0 : 1.5;  // TP1 R:R
+  const tp2R = tradeType === "meme" ? 3.0 : 2.5;  // TP2 R:R
+  const tp3R = tradeType === "meme" ? 4.5 : 3.5;  // TP3 R:R
+
+  const slDist = price * slPct;
+
+  const LONG = {
+    entryLow : fmt(price * (1 - entryPct)),
+    entryHigh: fmt(price * (1 + entryPct)),
+    sl       : fmt(price - slDist),
+    tp1      : fmt(price + slDist * tp1R),
+    tp2      : fmt(price + slDist * tp2R),
+    tp3      : fmt(price + slDist * tp3R),
+    rr1      : `1:${tp1R}`,
+    rr3      : `1:${tp3R}`,
+  };
+  const SHORT = {
+    entryLow : fmt(price * (1 - entryPct)),
+    entryHigh: fmt(price * (1 + entryPct)),
+    sl       : fmt(price + slDist),
+    tp1      : fmt(price - slDist * tp1R),
+    tp2      : fmt(price - slDist * tp2R),
+    tp3      : fmt(price - slDist * tp3R),
+    rr1      : `1:${tp1R}`,
+    rr3      : `1:${tp3R}`,
+  };
+
+  const pct = tradeType === "meme"
+    ? `SL=${(slPct*100).toFixed(0)}% | TP partial: 40% at TP1, 35% at TP2, 25% at TP3`
+    : `SL=${(slPct*100).toFixed(0)}% | TP: trail after TP1`;
+
+  return `
+PRE-CALCULATED LEVELS (use EXACTLY these numbers — do NOT use placeholders):
+If LONG:  ENTRY $${LONG.entryLow}–$${LONG.entryHigh} | TP1 $${LONG.tp1} | TP2 $${LONG.tp2} | TP3 $${LONG.tp3} | SL $${LONG.sl} | R:R ${LONG.rr1}–${LONG.rr3}
+If SHORT: ENTRY $${SHORT.entryLow}–$${SHORT.entryHigh} | TP1 $${SHORT.tp1} | TP2 $${SHORT.tp2} | TP3 $${SHORT.tp3} | SL $${SHORT.sl} | R:R ${SHORT.rr1}–${SHORT.rr3}
+(${pct})`.trim();
+}
+
+const UPDATE_SYSTEM = `You are FXRonin. Update post from 2 chart images. Tight, max 10 lines.
+
+$TOKEN | PATH OF THE RONIN 🛫
+
+[ STATUS: RUNNING ] — PNL: +X% / -X%
+
+• PLAN     : then
+• NOW      : current structure
+• ACTION   : hold / move SL / partial TP
+• NEXT     : key level to watch
+
+🚩 1 sentence on discipline — tension, no advice.
+
+${RONIN_SIGN}`;
+
+const FLEX_SYSTEM = `You are FXRonin. Read PnL screenshot, extract EXACT numbers. Max 10 lines.
+
+$TOKEN | TARGET OBLITERATED 💎
+
+[ PROFIT: +XX% | +$XXX USDT ]
+
+• ENTRY    : $price
+• EXIT     : $price
+• LEV      : x
+• HOLD     : duration
+• EDGE     : 1 sentence — why it worked
+
+🚩 LESSON: 1 quotable line (screenshot-worthy).
+
+${RONIN_SIGN}`;
+
+const WR_SYSTEM = `You are FXRonin — veteran crypto trader. Daily session wrap for Binance Square. Tight, max 12 lines. No hashtags.
+
+RULES:
+- Plain text ONLY. No ** bold **, no * italic *, no markdown of any kind.
+- NEVER mention any country, language, city, or timezone in the post.
+- NEVER include PnL amounts, dollar values, or USDT figures — only W/L counts and win rate %.
+- Tone: WR≥65% → confident | 45–65% → process-focused | <45% → resilient & forward-looking.
+
+[DAILY LOG] 🗡️ — DATE
+
+List trades: ✅ $TOKEN WIN | ❌ $TOKEN LOSS | ⏳ $TOKEN RUNNING
+
+📊 SESSION
+• Calls    : n
+• Win Rate : %
+• Best     : $TOKEN
+• Mood     : 1 sharp phrase
+
+🚩 2 quotable sentences about today's discipline and read.
+🚩 1 forward-looking hook for tomorrow's session.
+
+${RONIN_SIGN}`;
+
+// ─── CONFIDENCE ENGINE (Price + Volume + OI) ─────────────────────────────────
+// Classic futures market logic:
+//   Price ↑ + Vol ↑ + OI ↑ → trend mạnh, dòng tiền mới vào      (+boost)
+//   Price ↑ + Vol ↑ + OI ↓ → short-covering, lực yếu dần         (-penalty)
+//   Price ↑ + Vol ↓        → rally thiếu lực, dễ fail            (-penalty)
+//   Price ↓ + Vol ↑ + OI ↑ → downtrend được xác nhận (short)     (+boost)
+function calcConfidence({
+  bias,           // "LONG" | "SHORT"
+  priceChangePct, // % thay đổi giá trong khung đang xét
+  volChangePct,   // % thay đổi volume so với MA20 volume
+  oiChangePct,    // % thay đổi open interest
+  techScore = 50, // điểm base từ tín hiệu TA (MA/RSI/structure) — range 0..100
+}) {
+  const dir = bias === "LONG" ? 1 : -1;
+  const priceDir = Math.sign(priceChangePct) || 0;
+  const volDir   = Math.sign(volChangePct)   || 0;
+  const oiDir    = Math.sign(oiChangePct)    || 0;
+
+  // 1) Giá đi đúng hướng bias?
+  const priceAligned = priceDir === dir;
+
+  // 2) Điểm Volume: volume tăng + giá đúng bias → cộng điểm (cap ±15)
+  const volScore = priceAligned
+    ? Math.min(15, Math.max(-10, volChangePct * 0.25))
+    : Math.min(0,  Math.max(-12, -Math.abs(volChangePct) * 0.15));
+
+  // 3) Điểm OI: OI tăng + giá đúng bias = tiền mới vào (mạnh nhất)
+  let oiScore = 0;
+  if (priceAligned && oiDir === 1)       oiScore =  Math.min(18, oiChangePct * 0.6);
+  else if (priceAligned && oiDir === -1) oiScore = -Math.min(10, Math.abs(oiChangePct) * 0.4);
+  else if (!priceAligned && oiDir === 1) oiScore = -Math.min(12, oiChangePct * 0.5);
+  else                                   oiScore =  0;
+
+  // 4) Triple-align bonus: P+V+OI cùng chiều → +8
+  const tripleAlign = priceAligned && volDir === 1 && oiDir === 1;
+  const comboBonus  = tripleAlign ? 8 : 0;
+
+  // 5) Penalty: rally/drop không có volume
+  const noVolPenalty = (priceAligned && volDir <= 0) ? -6 : 0;
+
+  const raw = techScore + volScore + oiScore + comboBonus + noVolPenalty;
+  return Math.round(Math.min(95, Math.max(50, raw)));
+}
+
+
+// ─── CHART GENERATOR v6.3 — Ultra Pro (canvas JPEG 1080×1080 square) ─────────
+function generateChartImage(postContent, token, bias) {
+  return new Promise((resolve) => {
+    // ── Canvas layout constants ────────────────────────────────────
+    const W = 1080, H = 1080;
+    const PANEL_W = 310;
+    const CHART_W = W - PANEL_W;   // 770
+    const Y_AXIS  = 58;            // left margin for price labels
+    const HDR_H   = 114;           // header + tags + MA legend
+    const VOL_H   = 100;           // volume bars zone
+    const FOOT_H  = 42;            // bottom branding strip (needs room for x-axis dates + disclaimer)
+    const GRID_TOP = HDR_H;
+    const GRID_BOT = H - VOL_H - FOOT_H;
+    const GRID_H   = GRID_BOT - GRID_TOP;  // ~610px
+
+    // ── 2x DPR rendering — 2160×2160px output, sharp on retina & mobile post ──
+    const DPR = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width  = W * DPR;
+    canvas.height = H * DPR;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(DPR, DPR); // all coordinates stay in 1440×820 space, output is 2880×1640
+
+    // ── Color palette ──────────────────────────────────────────────
+    const FX = {
+      bg:     "#0B0E11", card:   "#13171C", grid:   "#1A1F26",
+      border: "#252B33", text:   "#EAECEF", dim:    "#848E9C",
+      entry:  "#F0B90B", tp:     "#0ECB81", sl:     "#EF5350",
+      bull:   "#0ECB81", bear:   "#EF5350", gold:   "#F0B90B",
+      purple: "#C084FC", blue:   "#38BDF8",
+    };
+    const biasColor = bias === "LONG" ? FX.bull : FX.bear;
+
+    // ── Parse post content ─────────────────────────────────────────
+    const confMatch  = postContent.match(/CONF:\s*(\d+)%/) || postContent.match(/CONFIDENCE:\s*(\d+)%/);
+    const confidence = confMatch ? parseInt(confMatch[1]) : 72;
+    const entryMatch = postContent.match(/ENTRY\s*:\s*([^\n]+)/);
+    const tpMatch    = postContent.match(/TP\s*:\s*([^\n]+)/);
+    const slMatch    = postContent.match(/SL\s*:\s*([^\n]+)/);
+    const rrMatch    = postContent.match(/R:R\s*:\s*([^\n]+)/);
+    const levMatch   = postContent.match(/LEV\s*:\s*([^\n]+)/);
+    const tfMatch    = postContent.match(/TF\s*:\s*([^\n]+)/);
+    const edgeMatch  = postContent.match(/🚩 EDGE:\s*([^\n]+)/);
+    const trigMatch  = postContent.match(/🚩 TRIGGER:\s*([^\n]+)/);
+
+    const tf       = tfMatch  ? tfMatch[1].trim()  : "1D";
+    const rrStr    = rrMatch  ? rrMatch[1].trim()  : "1:3";
+    const levStr   = levMatch ? levMatch[1].trim() : "10x";
+    const entryStr = entryMatch ? entryMatch[1].trim() : "—";
+    const slStr    = slMatch  ? slMatch[1].trim()  : "—";
+    const tpParts  = tpMatch
+      ? tpMatch[1].trim().split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean)
+      : [];
+    const edgeFull = edgeMatch ? edgeMatch[1].trim() : "Key structure breakdown confirmed";
+    const trigFull = trigMatch ? trigMatch[1].trim() : "Entry on confirmed close below key level";
+    const sentPct  = Math.min(95, Math.max(55, confidence));
+    const sentLabel = bias === "LONG" ? "BULLISH" : "BEARISH";
+
+    // Parse live 24H Vol / OI from post content (if present)
+    const volRx = postContent.match(/24H?\s*Vol[\w]*[:\s]+([0-9.,]+\s*[KMBkmb]?)/i)
+               || postContent.match(/volume[:\s]+([0-9.,]+\s*[KMBkmb]?)/i);
+    const oiRx  = postContent.match(/\bOI[:\s]+([0-9.,]+\s*[KMBkmb]?)/i)
+               || postContent.match(/open interest[:\s]+([0-9.,]+\s*[KMBkmb]?)/i);
+    const vol24h = volRx ? volRx[1].trim() : "—";
+    const oiStat = oiRx  ? oiRx[1].trim()  : "—";
+
+    // Parse entry price for Y-axis display
+    const rawEntry = parseFloat((entryStr.match(/[\d.]+/) || ["100"])[0]) || 100;
+    const decPl    = ((entryStr.match(/\.(\d+)/) || ["","00"])[1] || "00").length;
+    const fmtP     = (normVal, scale) => (normVal * scale).toFixed(decPl);
+
+    // Text wrap helper
+    const wrapAt = (text, max = 30) => {
+      const words = text.split(" "); const lines = []; let cur = "";
+      words.forEach(w => {
+        if ((cur + " " + w).trim().length <= max) cur = (cur + " " + w).trim();
+        else { if (cur) lines.push(cur); cur = w; }
+      });
+      if (cur) lines.push(cur); return lines;
+    };
+
+    // ── Candle simulation — seeded LCG + realistic OHLC ──────────
+    const N = 45;
+    // Mulberry32 seeded PRNG — far more random than sine waves
+    let _s = token.split("").reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0x9e3779b9) >>> 0;
+    const rand = () => {
+      _s += 0x6D2B79F5; let z = _s;
+      z = Math.imul(z ^ (z >>> 15), z | 1);
+      z ^= z + Math.imul(z ^ (z >>> 7), z | 61);
+      return ((z ^ (z >>> 14)) >>> 0) / 0x100000000;
+    };
+    // Box-Muller normal distribution
+    const randN = (std = 1) => {
+      const u = Math.max(1e-9, rand()), v = rand();
+      return std * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    };
+
+    const candles = [];
+    // SHORT starts from low → pumps to top (entry = distribution zone at peak)
+    // LONG  starts from high → drops to bottom → bounces (entry = breakout zone)
+    let close = bias === "SHORT" ? 18 : 108;
+
+    for (let i = 0; i < N; i++) {
+      const t = i / N;
+      let trendBias, volMult, volatility;
+
+      if (bias === "SHORT") {
+        // SHORT narrative: Slow accumulation → Parabolic pump → Distribution top
+        // → First rejection begins → Dead-cat / bleed start
+        // Current price (rightmost) sits at the distribution top — perfect SHORT entry
+        if      (t < 0.22) { trendBias =  0.28; volMult = 0.30; volatility = 0.55; } // Accumulation
+        else if (t < 0.50) { trendBias =  2.90; volMult = 1.40; volatility = 1.10; } // Parabolic pump
+        else if (t < 0.68) { trendBias =  0.18; volMult = 2.20; volatility = 2.60; } // Distribution (wicks)
+        else if (t < 0.83) { trendBias = -1.10; volMult = 1.60; volatility = 1.50; } // First rejection
+        else                { trendBias = -0.35; volMult = 0.70; volatility = 0.80; } // Dead-cat bleed
+      } else {
+        // LONG narrative: Prior downtrend → Tight accumulation → Explosive breakout
+        // → Uptrend continuation → Consolidation
+        // Current price (rightmost) sits at the recovery zone — perfect LONG entry
+        if      (t < 0.30) { trendBias = -0.80; volMult = 0.50; volatility = 0.95; } // Downtrend
+        else if (t < 0.46) { trendBias =  0.02; volMult = 0.22; volatility = 0.45; } // Accumulation
+        else if (t < 0.57) { trendBias =  2.80; volMult = 3.50; volatility = 1.40; } // Breakout
+        else if (t < 0.78) { trendBias =  0.85; volMult = 1.10; volatility = 0.90; } // Uptrend
+        else                { trendBias =  0.22; volMult = 0.45; volatility = 0.70; } // Consolidation
+      }
+
+      const open = close;
+      const moveSize = trendBias + randN(volatility);
+      close = Math.max(2, Math.min(195, open + moveSize));
+
+      const bullish   = close >= open;
+      const bodyRange = Math.abs(close - open);
+      const baseWick  = bodyRange * 0.15 + Math.abs(randN(bodyRange * 0.35 + 0.3));
+      let upperWickAdd, lowerWickAdd;
+
+      if (bias === "SHORT" && t > 0.47 && t < 0.68) {
+        // Distribution top: long upper wicks = price rejection at resistance
+        upperWickAdd = Math.abs(randN(bodyRange * 1.0 + 1.5));
+        lowerWickAdd = Math.abs(randN(bodyRange * 0.18 + 0.15));
+      } else if (bias === "SHORT" && t > 0.67 && t < 0.84) {
+        // First rejection leg: strong bearish bodies, tiny upper wick
+        upperWickAdd = Math.abs(randN(0.12));
+        lowerWickAdd = Math.abs(randN(bodyRange * 0.30 + 0.35));
+      } else if (bias === "SHORT" && t > 0.22 && t < 0.50) {
+        // Pump phase: clean bullish bodies, tiny lower wick
+        upperWickAdd = Math.abs(randN(bodyRange * 0.20 + 0.20));
+        lowerWickAdd = Math.abs(randN(0.10));
+      } else if (bias === "LONG" && t > 0.46 && t < 0.57) {
+        // Breakout candle: huge body, tiny wicks both sides — pure momentum
+        upperWickAdd = Math.abs(randN(0.12));
+        lowerWickAdd = Math.abs(randN(bodyRange * 0.18 + 0.15));
+      } else if (bias === "LONG" && t > 0.30 && t < 0.46) {
+        // Accumulation: tiny bodies, long lower wicks (hammer / support zone)
+        upperWickAdd = Math.abs(randN(bodyRange * 0.30 + 0.20));
+        lowerWickAdd = Math.abs(randN(bodyRange * 1.10 + 1.20));
+      } else {
+        // Normal candles: natural asymmetric wicks
+        upperWickAdd = baseWick * (bullish ? 0.55 : 1.10) * (0.4 + rand() * 1.2);
+        lowerWickAdd = baseWick * (bullish ? 1.10 : 0.55) * (0.4 + rand() * 1.2);
+      }
+
+      const high = Math.max(open, close) + Math.max(0.05, upperWickAdd);
+      const low  = Math.min(open, close) - Math.max(0.05, lowerWickAdd);
+
+      candles.push({
+        o: open, c: close, h: high, l: low,
+        v: Math.max(0.05, volMult * (0.5 + rand() * 0.8)),
+      });
+    }
+
+    // Price range & coordinate helpers
+    const allPx = candles.flatMap(c => [c.h, c.l]);
+    const minP  = Math.min(...allPx), maxP = Math.max(...allPx);
+    const pad   = (maxP - minP) * 0.09;
+    const lo = minP - pad, hi = maxP + pad, priceRange = hi - lo;
+    const toY  = p  => GRID_BOT - ((p - lo) / priceRange) * GRID_H;
+    const cw   = Math.max(13, Math.floor((CHART_W - Y_AXIS - 8) / N) - 2);
+    const xOf  = i  => Y_AXIS + i * (cw + 1);
+
+    // Scale for display prices
+    // SHORT: entry anchors near the distribution TOP (price pumped, now rejecting)
+    // LONG:  entry anchors at the breakout/bounce zone (price recovering)
+    const anchorNorm = bias === "SHORT"
+      ? lo + priceRange * 0.80
+      : lo + priceRange * 0.38;
+    const priceScale = rawEntry / anchorNorm;
+
+    // ── BACKGROUNDS ───────────────────────────────────────────────
+    ctx.fillStyle = FX.bg; ctx.fillRect(0, 0, W, H);
+
+    // Right panel: bias-tinted background
+    const panelBg = ctx.createLinearGradient(CHART_W, 0, W, H);
+    panelBg.addColorStop(0, FX.card);
+    panelBg.addColorStop(1, biasColor + "0A");
+    ctx.fillStyle = panelBg; ctx.fillRect(CHART_W, 0, PANEL_W, H);
+
+    // Divider: bias-colored glow line
+    ctx.save();
+    ctx.strokeStyle = biasColor; ctx.lineWidth = 2; ctx.globalAlpha = 0.55;
+    ctx.beginPath(); ctx.moveTo(CHART_W, 0); ctx.lineTo(CHART_W, H); ctx.stroke();
+    ctx.globalAlpha = 0.12; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(CHART_W, 0); ctx.lineTo(CHART_W, H); ctx.stroke();
+    ctx.restore();
+
+    // ── GRID & Y-AXIS PRICE LABELS ────────────────────────────────
+    const G_LINES = 7;
+    for (let i = 0; i <= G_LINES; i++) {
+      const y    = GRID_TOP + i * (GRID_H / G_LINES);
+      const pVal = hi - (i / G_LINES) * priceRange;
+      ctx.strokeStyle = FX.grid; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(Y_AXIS, y); ctx.lineTo(CHART_W - 5, y); ctx.stroke();
+      ctx.fillStyle = FX.dim; ctx.font = "9px monospace"; ctx.textAlign = "right";
+      ctx.fillText(fmtP(pVal, priceScale), Y_AXIS - 4, y + 3);
+    }
+    ctx.textAlign = "left";
+
+    // ── X-AXIS DATE LABELS ────────────────────────────────────────
+    const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const now = new Date();
+    const X_TICKS = 6;
+    for (let i = 0; i <= X_TICKS; i++) {
+      const x       = Y_AXIS + i * ((CHART_W - Y_AXIS - 8) / X_TICKS);
+      const daysAgo = Math.round((X_TICKS - i) * (N / X_TICKS) * 1.4);
+      const d       = new Date(now); d.setDate(d.getDate() - daysAgo);
+      ctx.fillStyle = FX.dim; ctx.font = "9px monospace"; ctx.textAlign = "center";
+      ctx.fillText(`${MONTHS[d.getMonth()]} ${d.getDate()}`, x, H - FOOT_H + 14);
+      ctx.strokeStyle = FX.border; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(x, GRID_BOT); ctx.lineTo(x, GRID_BOT + 5); ctx.stroke();
+    }
+    ctx.textAlign = "left";
+
+    // ── BIAS ATMOSPHERE — makes LONG vs SHORT immediately recognisable ──────
+    if (bias === "SHORT") {
+      // Bear chart: red danger zone fades down from the top (distribution area)
+      const bearTop = ctx.createLinearGradient(Y_AXIS, GRID_TOP, Y_AXIS, GRID_TOP + GRID_H * 0.52);
+      bearTop.addColorStop(0, FX.bear + "1A");
+      bearTop.addColorStop(1, "transparent");
+      ctx.fillStyle = bearTop;
+      ctx.fillRect(Y_AXIS, GRID_TOP, CHART_W - Y_AXIS - 5, GRID_H * 0.52);
+
+      // Entry/rejection zone: right 20% of chart gets a subtle red warning tint
+      const rzX = xOf(Math.floor(N * 0.78));
+      const rejZone = ctx.createLinearGradient(rzX, 0, CHART_W - 5, 0);
+      rejZone.addColorStop(0, "transparent");
+      rejZone.addColorStop(1, FX.bear + "10");
+      ctx.fillStyle = rejZone;
+      ctx.fillRect(rzX, GRID_TOP, CHART_W - 5 - rzX, GRID_H);
+
+    } else {
+      // Bull chart: green support zone glows up from the bottom (accumulation area)
+      const bullBot = ctx.createLinearGradient(Y_AXIS, GRID_BOT - GRID_H * 0.48, Y_AXIS, GRID_BOT);
+      bullBot.addColorStop(0, "transparent");
+      bullBot.addColorStop(1, FX.bull + "16");
+      ctx.fillStyle = bullBot;
+      ctx.fillRect(Y_AXIS, GRID_BOT - GRID_H * 0.48, CHART_W - Y_AXIS - 5, GRID_H * 0.48);
+
+      // Breakout momentum zone: candles 44-62% get a subtle upward pulse
+      const brkX1 = xOf(Math.floor(N * 0.43));
+      const brkX2 = xOf(Math.floor(N * 0.63));
+      const brkZone = ctx.createLinearGradient(brkX1, 0, brkX2, 0);
+      brkZone.addColorStop(0, "transparent");
+      brkZone.addColorStop(0.5, FX.bull + "0B");
+      brkZone.addColorStop(1, "transparent");
+      ctx.fillStyle = brkZone;
+      ctx.fillRect(brkX1, GRID_TOP, brkX2 - brkX1, GRID_H);
+    }
+
+    // ── VOLUME BARS ───────────────────────────────────────────────
+    const volTop = GRID_BOT + 6, volBot = H - FOOT_H - 6, volHt = volBot - volTop;
+    const maxVol = Math.max(...candles.map(c => c.v));
+    candles.forEach((c, i) => {
+      const x    = xOf(i);
+      const vh   = Math.max(2, (c.v / maxVol) * volHt);
+      const col  = c.c >= c.o ? FX.bull : FX.bear;
+      const isSpike = c.v / maxVol > 0.6;
+      ctx.fillStyle = col + (isSpike ? "90" : "55");
+      ctx.fillRect(x + 1, volBot - vh, cw - 2, vh);
+      // Bright top edge for spike candles
+      if (isSpike) {
+        ctx.fillStyle = col + "CC";
+        ctx.fillRect(x + 1, volBot - vh, cw - 2, 2);
+      }
+    });
+    // "Vol M" label
+    ctx.save();
+    ctx.fillStyle = FX.dim; ctx.font = "9px monospace";
+    ctx.translate(13, (volTop + volBot) / 2 + 16);
+    ctx.rotate(-Math.PI / 2); ctx.textAlign = "center";
+    ctx.fillText("Vol M", 0, 0); ctx.restore();
+
+    // ── MA CALCULATIONS ───────────────────────────────────────────
+    const closes = candles.map(c => c.c);
+    const sma = (arr, k) => arr.map((_, i) =>
+      i < k - 1 ? null : arr.slice(i - k + 1, i + 1).reduce((s, v) => s + v, 0) / k
+    );
+    const ma7  = sma(closes, 7);
+    const ma25 = sma(closes, 20);
+    const ma99 = sma(closes, Math.min(42, N));
+
+    // MA draw: glow pass (thick transparent) + crisp pass (thin solid)
+    const drawMA = (ma, color, lw = 1.8, dash = [], glowAlpha = 0.22, glowW = 5) => {
+      const buildPath = () => {
+        ctx.beginPath(); let started = false;
+        ma.forEach((v, i) => {
+          if (!v) return;
+          const x = xOf(i) + cw / 2, y = toY(v);
+          started ? ctx.lineTo(x, y) : (ctx.moveTo(x, y), started = true);
+        });
+      };
+      ctx.save();
+      ctx.setLineDash(dash);
+      // Glow pass
+      if (dash.length === 0) {
+        ctx.strokeStyle = color; ctx.lineWidth = glowW;
+        ctx.globalAlpha = glowAlpha;
+        buildPath(); ctx.stroke();
+      }
+      // Crisp pass
+      ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.globalAlpha = 1;
+      buildPath(); ctx.stroke();
+      ctx.restore();
+    };
+
+    // ── CANDLES ───────────────────────────────────────────────────
+    candles.forEach((c, i) => {
+      const x   = xOf(i);
+      const bull = c.c >= c.o;
+      const col  = bull ? FX.bull : FX.bear;
+      const cx   = x + cw / 2;
+      const yH   = toY(c.h), yL = toY(c.l);
+      const yO   = toY(c.o), yC = toY(c.c);
+      const bodyTop = Math.min(yO, yC), bodyBot = Math.max(yO, yC);
+      const bH  = Math.max(1.5, bodyBot - bodyTop);
+      const isDoji = bH <= 2.5;
+
+      // ── Wick: 1px, same hue as body, slightly dimmed
+      ctx.save();
+      ctx.strokeStyle = col + "B0";
+      ctx.lineWidth   = 1;
+      ctx.beginPath(); ctx.moveTo(cx, yH);      ctx.lineTo(cx, bodyTop);  ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, bodyBot);  ctx.lineTo(cx, yL);       ctx.stroke();
+      ctx.restore();
+
+      if (isDoji) {
+        // Doji / spinning top: cross + tiny body rect
+        ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x + 1, yC); ctx.lineTo(x + cw - 1, yC); ctx.stroke();
+        if (bH > 0.8) {
+          ctx.fillStyle = col + "80";
+          ctx.fillRect(x + 1, bodyTop, cw - 2, bH);
+        }
+      } else {
+        // ── Body: gradient fill (gives depth like real charting apps)
+        const bodyGrad = ctx.createLinearGradient(0, bodyTop, 0, bodyBot);
+        if (bull) {
+          // Green: bright top → slightly darker bottom
+          bodyGrad.addColorStop(0,   col + "FF");
+          bodyGrad.addColorStop(0.5, col + "EE");
+          bodyGrad.addColorStop(1,   col + "BB");
+        } else {
+          // Red: slightly muted top → deeper red bottom
+          bodyGrad.addColorStop(0,   col + "BB");
+          bodyGrad.addColorStop(0.5, col + "EE");
+          bodyGrad.addColorStop(1,   col + "FF");
+        }
+        ctx.fillStyle = bodyGrad;
+        ctx.fillRect(x + 1, bodyTop, cw - 2, bH);
+
+        // Thin highlight on leading edge (top for bull, bottom for bear)
+        ctx.fillStyle = "#FFFFFF18";
+        if (bull) ctx.fillRect(x + 1, bodyTop,       cw - 2, 1);
+        else      ctx.fillRect(x + 1, bodyBot - 1,   cw - 2, 1);
+
+        // Left border line (subtle depth)
+        ctx.fillStyle = bull ? "#FFFFFF18" : "#00000030";
+        ctx.fillRect(x + 1, bodyTop, 1, bH);
+      }
+    });
+
+    // MAs drawn after candles so they render on top
+    drawMA(ma99, FX.blue,   1.2, [5, 5]);
+    drawMA(ma25, FX.purple, 2.0, [], 0.18, 7);
+    drawMA(ma7,  FX.gold,   1.8, [], 0.20, 6);
+
+    // ── LEVEL LINES ───────────────────────────────────────────────
+    const midP = (hi + lo) / 2, spread = hi - lo;
+    const lastX = xOf(N - 1) + cw + 4;
+    const levelDefs = bias === "LONG"
+      ? [
+          { off: -0.02, color: FX.entry, dash: false },
+          { off: +0.12, color: FX.tp,    dash: true  },
+          { off: +0.22, color: FX.tp,    dash: true  },
+          { off: +0.33, color: FX.tp,    dash: true  },
+          { off: -0.17, color: FX.sl,    dash: true  },
+        ]
+      : [
+          { off: +0.02, color: FX.entry, dash: false },
+          { off: -0.12, color: FX.tp,    dash: true  },
+          { off: -0.22, color: FX.tp,    dash: true  },
+          { off: -0.33, color: FX.tp,    dash: true  },
+          { off: +0.17, color: FX.sl,    dash: true  },
+        ];
+
+    // Zone fills: subtle colored bands between entry and each TP/SL
+    const entryOff  = levelDefs.find(l => l.color === FX.entry)?.off ?? 0;
+    const slOff     = levelDefs.find(l => l.color === FX.sl)?.off ?? 0;
+    const entryY = toY(midP + spread * entryOff);
+    const slY    = toY(midP + spread * slOff);
+    // SL zone (entry → SL)
+    if (entryY > GRID_TOP && slY < GRID_BOT) {
+      ctx.save(); ctx.globalAlpha = 0.055;
+      ctx.fillStyle = FX.sl;
+      const zy1 = Math.min(entryY, slY), zy2 = Math.max(entryY, slY);
+      ctx.fillRect(Y_AXIS, zy1, CHART_W - Y_AXIS - 5, zy2 - zy1);
+      ctx.restore();
+    }
+    // TP zone (entry → TP1)
+    const tp1Off = levelDefs.filter(l => l.color === FX.tp)[0]?.off ?? 0;
+    const tp1Y   = toY(midP + spread * tp1Off);
+    if (entryY > GRID_TOP && tp1Y > GRID_TOP) {
+      ctx.save(); ctx.globalAlpha = 0.055;
+      ctx.fillStyle = FX.tp;
+      const zy1 = Math.min(entryY, tp1Y), zy2 = Math.max(entryY, tp1Y);
+      ctx.fillRect(Y_AXIS, zy1, CHART_W - Y_AXIS - 5, zy2 - zy1);
+      ctx.restore();
+    }
+
+    // Level lines (drawn after fills)
+    levelDefs.forEach(({ off, color, dash }) => {
+      const pv = midP + spread * off;
+      const y  = toY(pv);
+      if (y < GRID_TOP + 2 || y > GRID_BOT - 2) return;
+      ctx.save();
+      ctx.strokeStyle = color; ctx.lineWidth = dash ? 0.9 : 1.8;
+      ctx.globalAlpha = dash ? 0.55 : 0.90;
+      ctx.setLineDash(dash ? [8, 6] : []);
+      ctx.beginPath(); ctx.moveTo(Y_AXIS, y); ctx.lineTo(CHART_W - 5, y); ctx.stroke();
+      ctx.restore();
+    });
+
+    // Current price arrow
+    const curC = candles[N - 1];
+    const curY = toY(curC.c);
+    ctx.fillStyle = biasColor;
+    ctx.beginPath();
+    ctx.moveTo(lastX + 6, curY);
+    ctx.lineTo(lastX - 4, curY - 6);
+    ctx.lineTo(lastX - 4, curY + 6);
+    ctx.fill();
+
+    // ── PRE-COMPUTE shared vars (used by annotations + header + pills) ─
+    const peakIdx      = candles.reduce((m, c, i) => c.h > candles[m].h ? i : m, 0);
+    const peakPriceVal = fmtP(candles[peakIdx].h, priceScale);
+    const peakNum      = parseFloat(peakPriceVal) || 1;
+    const curNum       = parseFloat(fmtP(candles[N-1].c, priceScale)) || peakNum;
+    const athDdPct     = (((curNum - peakNum) / peakNum) * 100).toFixed(1);
+    const edgeLow      = edgeFull.toLowerCase();
+    const extraTag     =
+      edgeLow.includes("manipulat") ? "MANIPULATED"
+      : edgeLow.includes("dump") || edgeLow.includes("whale") ? "WHALE DUMP"
+      : edgeLow.includes("squeeze")    ? "SQUEEZE"
+      : edgeLow.includes("breakout")   ? "BREAKOUT"
+      : edgeLow.includes("momentum")   ? "MOMENTUM"
+      : bias === "LONG"                 ? "ACCUMULATION"
+      :                                   "DISTRIBUTION";
+
+    // ── ATH MARKER ────────────────────────────────────────────────
+    {
+      const ax    = xOf(peakIdx) + cw / 2;
+      const peakY = toY(candles[peakIdx].h);
+      const ay    = Math.max(GRID_TOP + 26, peakY - 32);
+      const athTxt = `ATH  $${fmtP(candles[peakIdx].h, priceScale)}`;
+      ctx.font = "bold 9px monospace";
+      const tw = ctx.measureText(athTxt).width + 20;
+
+      // Connector line: dashed, dim
+      ctx.save();
+      ctx.strokeStyle = FX.dim + "60"; ctx.lineWidth = 0.8;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(ax, ay + 1); ctx.lineTo(ax, peakY - 2); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Small dot at peak tip
+      ctx.fillStyle = FX.dim + "99";
+      ctx.beginPath(); ctx.arc(ax, peakY - 1, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+
+      // Label background with border
+      ctx.fillStyle = "#13171CEE";
+      ctx.beginPath(); ctx.roundRect(ax - tw/2, ay - 16, tw, 17, 3); ctx.fill();
+      ctx.strokeStyle = FX.dim + "70"; ctx.lineWidth = 0.9;
+      ctx.beginPath(); ctx.roundRect(ax - tw/2, ay - 16, tw, 17, 3); ctx.stroke();
+
+      ctx.fillStyle = FX.text + "BB"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center";
+      ctx.fillText(athTxt, ax, ay - 3);
+      ctx.textAlign = "left";
+    }
+
+    // ── PRIMARY EVENT ANNOTATION (DISTRIBUTION / BREAKOUT) ──────
+    // SHORT: find the candle with the biggest upper wick in the distribution zone
+    //        (t=0.50–0.70) — largest rejection = clearest signal
+    // LONG:  find the candle with the biggest positive body in the breakout zone
+    //        (t=0.46–0.57) — strongest momentum candle
+    const distStart = Math.floor(N * 0.50), distEnd   = Math.floor(N * 0.70);
+    const brkStart  = Math.floor(N * 0.46), brkEnd    = Math.floor(N * 0.57);
+    const dumpIdx = bias === "SHORT"
+      ? candles.reduce((m, c, i) =>
+          i >= distStart && i <= distEnd && (c.h - Math.max(c.o, c.c)) > (candles[m].h - Math.max(candles[m].o, candles[m].c)) ? i : m,
+          distStart)
+      : candles.reduce((m, c, i) =>
+          i >= brkStart && i <= brkEnd && (c.c - c.o) > (candles[m].c - candles[m].o) ? i : m,
+          brkStart);
+    {
+      const cx     = Math.min(Math.max(xOf(dumpIdx) + cw / 2, Y_AXIS + 80), CHART_W - 90);
+      const candlePY = bias === "SHORT" ? toY(candles[dumpIdx].h) : toY(candles[dumpIdx].l);
+      const eventLabel = bias === "SHORT" ? "DISTRIBUTION" : "BREAKOUT";
+
+      // Parse extra stats from post: amount sold / % drop
+      const amtRx   = postContent.match(/([0-9.,]+\s*[KMBkmb]?\s*(?:\$[A-Z]+|[A-Z]{2,6}))\s*(?:sold|dump|drop|sell)/i)
+                   || postContent.match(/([0-9.,]+\s*[KMBkmb]\s*(?:USDT|USD|\$))/i);
+      const dropRx  = postContent.match(/(-?\d+(?:\.\d+)?%)\s*(?:in\s+(?:hours?|mins?|days?)|drop|crash)/i)
+                   || postContent.match(/(\d+(?:\.\d+)?%)\s*(?:bearish|dump|decline)/i);
+      const amtLine  = amtRx  ? amtRx[1].trim()               : `${fmtP(candles[peakIdx]?.h ?? candles[dumpIdx].h, priceScale)} ATH`;
+      const dropLine = dropRx ? dropRx[1] + " move"           : `−${Math.abs(athDdPct)}% from ATH`;
+      const subLines = wrapAt(edgeFull.slice(0, 44), 22);
+      const extraDataLines = [amtLine, dropLine];
+      const totalLines = extraDataLines.length + subLines.length;
+      const boxH = 20 + totalLines * 13 + 12;
+      const boxW = 178;
+
+      // Position box below (SHORT/distribution) or above (LONG/breakout) the key candle
+      const isBelow = bias === "SHORT";
+      const ay = isBelow
+        ? Math.min(candlePY + 14, GRID_BOT - boxH - 10)
+        : Math.max(candlePY - boxH - 14, GRID_TOP + 10);
+
+      // Glow aura behind box
+      ctx.save();
+      ctx.shadowColor  = biasColor;
+      ctx.shadowBlur   = 18;
+      ctx.globalAlpha  = 0.18;
+      ctx.fillStyle    = biasColor;
+      ctx.beginPath(); ctx.roundRect(cx - boxW/2 - 2, ay - 2, boxW + 4, boxH + 4, 7); ctx.fill();
+      ctx.restore();
+
+      // Connector line from candle to box
+      ctx.save();
+      ctx.strokeStyle = biasColor + "90"; ctx.lineWidth = 1.2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(cx, candlePY);
+      ctx.lineTo(cx, isBelow ? ay : ay + boxH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Box: gradient dark fill + solid colored border
+      const bxFill = ctx.createLinearGradient(cx - boxW/2, ay, cx - boxW/2, ay + boxH);
+      bxFill.addColorStop(0, "#0D1015F8");
+      bxFill.addColorStop(1, "#131820F8");
+      ctx.fillStyle = bxFill;
+      ctx.beginPath(); ctx.roundRect(cx - boxW/2, ay, boxW, boxH, 5); ctx.fill();
+      ctx.strokeStyle = biasColor; ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.roundRect(cx - boxW/2, ay, boxW, boxH, 5); ctx.stroke();
+
+      // Event title
+      ctx.fillStyle = biasColor; ctx.font = "bold 12px monospace"; ctx.textAlign = "center";
+      ctx.fillText(eventLabel, cx, ay + 16);
+
+      // Thin separator under title
+      ctx.save(); ctx.globalAlpha = 0.45;
+      ctx.strokeStyle = biasColor; ctx.lineWidth = 0.7;
+      ctx.beginPath(); ctx.moveTo(cx - boxW/2 + 10, ay + 21); ctx.lineTo(cx + boxW/2 - 10, ay + 21); ctx.stroke();
+      ctx.restore();
+
+      // Data lines (amount & %)
+      ctx.fillStyle = FX.text; ctx.font = "bold 10px monospace";
+      extraDataLines.forEach((line, j) => {
+        ctx.fillText(line, cx, ay + 34 + j * 13);
+      });
+
+      // Sub-text lines (edge)
+      ctx.fillStyle = FX.text + "99"; ctx.font = "9px monospace";
+      subLines.forEach((line, j) => {
+        ctx.fillText(line, cx, ay + 34 + extraDataLines.length * 13 + 4 + j * 13);
+      });
+      ctx.textAlign = "left";
+    }
+
+    // ── SECONDARY ANNOTATION (AUDIT / BLACK BOX / TRIGGER) ──────
+    {
+      // SHORT: catalyst note in the distribution zone (~64%)
+      // LONG:  catalyst note near the consolidation zone (~74%)
+      const secIdx  = Math.floor(N * (bias === "SHORT" ? 0.64 : 0.74));
+      const cx2     = Math.min(Math.max(xOf(secIdx) + cw / 2, Y_AXIS + 80), CHART_W - 90);
+
+      // Header: AUDIT for MANIPULATED/WHALE DUMP, CATALYST for others
+      const isManip = extraTag === "MANIPULATED" || extraTag === "WHALE DUMP";
+      const secHeader = isManip
+        ? (bias === "SHORT" ? "AUDIT  \"BLACK BOX\"" : "CATALYST NOTE")
+        : "CATALYST";
+
+      // Lines: trigger + optional "source unverified" for manipulated
+      const trigLines = wrapAt((trigFull || edgeFull).slice(0, 46), 22);
+      const sourceStr = isManip ? "Source code unverified" : null;
+      const totalSec  = trigLines.length + (sourceStr ? 1 : 0);
+      const bH2 = 18 + totalSec * 13 + 10;
+      const bW2 = 174;
+
+      const candleY2 = toY(candles[secIdx].l);
+      // Anchor near bottom of chart — above volume zone
+      const ay2 = Math.min(candleY2 + 14, GRID_BOT - bH2 - 12);
+
+      // Box fill + gold dashed border
+      ctx.fillStyle = "#0C0F14EC";
+      ctx.beginPath(); ctx.roundRect(cx2 - bW2/2, ay2, bW2, bH2, 4); ctx.fill();
+
+      ctx.save();
+      ctx.strokeStyle = FX.gold; ctx.lineWidth = 0.9;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath(); ctx.roundRect(cx2 - bW2/2, ay2, bW2, bH2, 4); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Header text
+      ctx.fillStyle = FX.gold + "CC"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center";
+      ctx.fillText(secHeader, cx2, ay2 + 12);
+
+      // Thin separator
+      ctx.save(); ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = FX.gold; ctx.lineWidth = 0.6;
+      ctx.beginPath(); ctx.moveTo(cx2 - bW2/2 + 8, ay2 + 16); ctx.lineTo(cx2 + bW2/2 - 8, ay2 + 16); ctx.stroke();
+      ctx.restore();
+
+      // Trigger lines
+      ctx.fillStyle = FX.text + "A0"; ctx.font = "9px monospace";
+      trigLines.forEach((line, j) => ctx.fillText(line, cx2, ay2 + 28 + j * 13));
+
+      // Source line (italic-style, dim)
+      if (sourceStr) {
+        ctx.fillStyle = FX.dim + "CC"; ctx.font = "9px monospace";
+        ctx.fillText(sourceStr, cx2, ay2 + 28 + trigLines.length * 13);
+      }
+      ctx.textAlign = "left";
+    }
+
+    // ── HEADER ────────────────────────────────────────────────────
+    // Token pair name — muted gray
+    ctx.fillStyle = FX.dim; ctx.font = "bold 17px 'Orbitron', monospace";
+    ctx.fillText(`$${token} / USDT  Perp`, 20, 34);
+
+    // Current price — large, bias color, slightly lower baseline
+    const curPriceStr = fmtP(curC.c, priceScale);
+    const nameW = ctx.measureText(`$${token} / USDT  Perp`).width;
+    ctx.font = "bold 26px 'Orbitron', monospace"; ctx.fillStyle = biasColor;
+    ctx.fillText(curPriceStr, 28 + nameW, 38);
+
+    // % change with triangle indicator — smaller, right after price
+    const refC = candles[Math.max(0, N - 26)].c;
+    const chPct = ((curC.c - refC) / refC) * 100;
+    const chLabel = `${chPct >= 0 ? "▲" : "▼"} ${Math.abs(chPct).toFixed(2)}%`;
+    const priceW = ctx.measureText(curPriceStr).width;
+    ctx.font = "bold 13px monospace";
+    ctx.fillStyle = chPct >= 0 ? FX.bull : FX.bear;
+    ctx.fillText(chLabel, 36 + nameW + priceW, 30);
+
+    // Top-right: stats row + FXRonin brand
+    const statsLine = `24H Vol: ${vol24h}|OI: ${oiStat}   |   ATH Drawdown: ${athDdPct}%`;
+    ctx.fillStyle = FX.dim; ctx.font = "11px monospace"; ctx.textAlign = "right";
+    ctx.fillText(statsLine, CHART_W - 10, 18);
+    ctx.fillStyle = FX.gold; ctx.font = "bold 15px 'Orbitron', monospace";
+    ctx.fillText("FXRonin", CHART_W - 10, 40);
+    ctx.textAlign = "left";
+
+    // Bias accent line (under header) — gradient fade
+    const hdrGrad = ctx.createLinearGradient(0, 50, CHART_W, 50);
+    hdrGrad.addColorStop(0,   biasColor + "FF");
+    hdrGrad.addColorStop(0.6, biasColor + "AA");
+    hdrGrad.addColorStop(1,   biasColor + "22");
+    ctx.fillStyle = hdrGrad; ctx.fillRect(0, 50, CHART_W, 2);
+
+    // Subtle glow below accent line
+    const hdrGlow = ctx.createLinearGradient(0, 52, 0, 60);
+    hdrGlow.addColorStop(0, biasColor + "28");
+    hdrGlow.addColorStop(1, "transparent");
+    ctx.fillStyle = hdrGlow; ctx.fillRect(0, 52, CHART_W, 8);
+
+    // ── TAG PILLS ─────────────────────────────────────────────────
+    const PILLS = [
+      { text: bias === "LONG" ? "LONG" : "SHORT",                fill: biasColor,       textCol: FX.bg    },
+      { text: bias === "LONG" ? "BULLISH BIAS" : "BEARISH BIAS", border: biasColor,     textCol: biasColor},
+      { text: tf,                                                 border: FX.dim,        textCol: FX.dim   },
+      { text: `${levStr} LEV`,                                   border: FX.purple,     textCol: FX.purple},
+      { text: extraTag,                fill: FX.gold + "28",    border: FX.gold,        textCol: FX.gold  },
+    ];
+    let tagX = 20;
+    const tagY = 60, tagH = 22;
+    ctx.font = "bold 11px monospace";
+    PILLS.forEach(p => {
+      const tw = ctx.measureText(p.text).width + 22;
+      if (p.fill) {
+        ctx.fillStyle = p.fill;
+        ctx.beginPath(); ctx.roundRect(tagX, tagY, tw, tagH, 3); ctx.fill();
+      }
+      if (p.border) {
+        ctx.save();
+        ctx.fillStyle = p.border + "14";
+        ctx.beginPath(); ctx.roundRect(tagX, tagY, tw, tagH, 3); ctx.fill();
+        ctx.strokeStyle = p.border; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.roundRect(tagX, tagY, tw, tagH, 3); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.fillStyle = p.textCol || FX.text;
+      ctx.fillText(p.text, tagX + 11, tagY + 15);
+      tagX += tw + 8;
+    });
+
+    // ── MA LEGEND ─────────────────────────────────────────────────
+    ctx.font = "11px monospace";
+    [["MA(7)", FX.gold, []], ["MA(25)", FX.purple, []], ["MA(99)", FX.blue, [4,3]]].forEach(([l, c, dash], idx) => {
+      const lx = 20 + idx * 90;
+      ctx.save();
+      ctx.strokeStyle = c; ctx.lineWidth = 1.5;
+      ctx.setLineDash(dash);
+      ctx.beginPath(); ctx.moveTo(lx, 98); ctx.lineTo(lx + 20, 98); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = FX.dim; ctx.fillText(l, lx + 24, 103);
+    });
+
+    // ── WATERMARK ─────────────────────────────────────────────────
+    ctx.save();
+    ctx.font = "bold 100px 'Orbitron', monospace"; ctx.fillStyle = FX.text;
+    ctx.globalAlpha = 0.025; ctx.textAlign = "center";
+    ctx.fillText("FXRONIN", CHART_W / 2, H / 2 + 40);
+    ctx.restore();
+
+    // ── RIGHT PANEL: TRADE PLAN ───────────────────────────────────
+    const px  = CHART_W + 18;
+    const pxR = W - 14;
+    let py = 20;
+
+    // Panel header with bias-colored top border accent
+    const panelAccentGrad = ctx.createLinearGradient(CHART_W + 10, 0, W - 10, 0);
+    panelAccentGrad.addColorStop(0, biasColor + "00");
+    panelAccentGrad.addColorStop(0.5, biasColor + "AA");
+    panelAccentGrad.addColorStop(1, biasColor + "00");
+    ctx.fillStyle = panelAccentGrad; ctx.fillRect(CHART_W + 10, 0, PANEL_W - 20, 2);
+
+    ctx.fillStyle = FX.dim; ctx.font = "bold 11px 'Orbitron', monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("TRADE PLAN", CHART_W + PANEL_W / 2, py + 12);
+    ctx.textAlign = "left";
+    py += 22;
+
+    // Separator + row helper with thin divider below each row
+    const panelSep = (alpha = 0.6) => {
+      ctx.save(); ctx.globalAlpha = alpha;
+      ctx.strokeStyle = FX.border; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(CHART_W + 10, py); ctx.lineTo(W - 10, py); ctx.stroke();
+      ctx.restore(); py += 13;
+    };
+    const panelRow = (label, value, valCol = FX.text, subRow = false) => {
+      const rowY = py + 11;
+      ctx.fillStyle = FX.dim; ctx.font = `${subRow ? 11 : 12}px monospace`;
+      ctx.fillText(label, px, rowY);
+      ctx.fillStyle = valCol; ctx.font = `bold ${subRow ? 12 : 14}px monospace`;
+      ctx.textAlign = "right";
+      ctx.fillText(String(value).slice(0, 22), pxR, rowY);
+      ctx.textAlign = "left";
+      py += subRow ? 27 : 30;
+      panelSep(0.35);
+    };
+
+    panelSep();
+    panelRow("EXECUTION", entryStr.slice(0, 20), FX.gold);
+    if (tpParts[0]) panelRow("TP 1", tpParts[0].slice(0, 16), FX.tp);
+    if (tpParts[1]) panelRow("TP 2", tpParts[1].slice(0, 16), FX.tp);
+    if (tpParts[2]) panelRow("TP 3", tpParts[2].slice(0, 16), FX.tp);
+    panelRow("INVALID", slStr.slice(0, 18), FX.sl);
+
+    // ── RIGHT PANEL: CATALYST ─────────────────────────────────────
+    py += 2; panelSep();
+
+    // CATALYST header + R:R on same line
+    ctx.fillStyle = FX.gold; ctx.font = "bold 11px 'Orbitron', monospace";
+    ctx.fillText("CATALYST", px, py + 11);
+    ctx.fillStyle = FX.gold; ctx.font = "bold 13px monospace";
+    ctx.textAlign = "right"; ctx.fillText(`≈ ${rrStr}`, pxR, py + 11); ctx.textAlign = "left";
+    // R:R sub-label
+    ctx.fillStyle = FX.dim; ctx.font = "9px monospace";
+    ctx.textAlign = "right"; ctx.fillText("R:R", pxR, py + 21); ctx.textAlign = "left";
+    py += 32;
+
+    // Edge bullets
+    wrapAt(edgeFull, 30).forEach((line, idx) => {
+      const isFirst = idx === 0;
+      ctx.fillStyle = isFirst ? FX.text : FX.dim;
+      ctx.font = `${isFirst ? "bold " : ""}10px monospace`;
+      ctx.fillText((isFirst ? "• " : "  ") + line, px, py); py += 14;
+    });
+
+    // Smart contract line
+    if (extraTag === "MANIPULATED" || extraTag === "WHALE DUMP") {
+      py += 2;
+      ctx.fillStyle = FX.gold; ctx.font = "10px monospace";
+      ctx.fillText(`Smart contract: "BLACK BOX"`, px, py); py += 14;
+    }
+    // Source
+    py += 2;
+    ctx.fillStyle = FX.dim; ctx.font = "10px monospace";
+    ctx.fillText("Source: Binance Futures live", px, py); py += 16;
+
+    // Trigger line
+    if (trigFull) {
+      ctx.fillStyle = FX.dim + "99"; ctx.font = "9px monospace";
+      wrapAt(trigFull.slice(0, 50), 30).forEach(line => {
+        ctx.fillText("→ " + line, px, py); py += 12;
+      });
+      py += 4;
+    }
+
+    // Sentiment — bold, colored
+    py += 4;
+    ctx.fillStyle = biasColor; ctx.font = "bold 12px monospace";
+    ctx.fillText(`Sentiment: ${sentPct}% ${sentLabel}`, px, py);
+
+    // ── BRANDING FOOTER ───────────────────────────────────────────
+    // FOOT_H=42: x-axis dates draw at H-FOOT_H+14 = 1052 (top of strip)
+    //            disclaimer draws at H-10 = 1070 (bottom of strip) → 18px gap ✅
+
+    // Thin separator line above footer strip
+    ctx.save(); ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = FX.border; ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(0, H - FOOT_H); ctx.lineTo(CHART_W, H - FOOT_H); ctx.stroke();
+    ctx.restore();
+
+    const dateStr = new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Ho_Chi_Minh" });
+
+    // Date — bottom-left
+    ctx.fillStyle = FX.dim; ctx.font = "9px monospace"; ctx.textAlign = "left";
+    ctx.fillText(dateStr, Y_AXIS, H - 10);
+
+    // Disclaimer — centered in chart area
+    ctx.fillStyle = FX.dim + "99"; ctx.font = "9px monospace"; ctx.textAlign = "center";
+    ctx.fillText("Not financial advice — Manage your own risk.", CHART_W / 2, H - 10);
+    ctx.textAlign = "left";
+
+    // FXRonin logo in right panel — centered, well above Binance Square watermark zone
+    ctx.fillStyle = FX.gold; ctx.font = "bold 12px 'Orbitron', monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("⛩ FXRonin", CHART_W + PANEL_W / 2, H - 58);
+    ctx.textAlign = "left";
+
+    // ── TOP GLOW LINE (chart area) ────────────────────────────────
+    const grad = ctx.createLinearGradient(0, 0, CHART_W, 0);
+    grad.addColorStop(0,   "transparent");
+    grad.addColorStop(0.3, biasColor + "EE");
+    grad.addColorStop(0.7, biasColor + "CC");
+    grad.addColorStop(1,   biasColor + "44");
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, CHART_W, 2);
+
+    // Top glow bleed beneath top border
+    const topGlow = ctx.createLinearGradient(0, 0, 0, 10);
+    topGlow.addColorStop(0, biasColor + "22");
+    topGlow.addColorStop(1, "transparent");
+    ctx.fillStyle = topGlow; ctx.fillRect(0, 2, CHART_W, 8);
+
+    // Export JPEG 96% — higher quality source so Binance iOS compression still looks sharp
+    canvas.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      resolve(url);
+    }, "image/jpeg", 0.96);
+  });
+}
+
+// ─── STYLES ───────────────────────────────────────────────────────────────────
+const inp = (ex = {}) => ({ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 15, padding: "12px 14px", fontFamily: "'Share Tech Mono',monospace", outline: "none", width: "100%", boxSizing: "border-box", ...ex });
+const btn = (color = C.gold, ex = {}) => ({ background: color + "18", border: `1.5px solid ${color}`, borderRadius: 10, color, fontSize: 12, fontWeight: 700, padding: "14px 16px", cursor: "pointer", fontFamily: "'Orbitron',monospace", letterSpacing: 1, transition: "all 0.15s", whiteSpace: "nowrap", touchAction: "manipulation", WebkitTapHighlightColor: "transparent", ...ex });
+const Card = ({ children, style = {} }) => <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, minWidth: 0, overflow: "hidden", ...style }}>{children}</div>;
+const Lbl = ({ c, children }) => <div style={{ fontSize: 10, color: c || C.mid, letterSpacing: 2, textTransform: "uppercase", marginBottom: 8, fontFamily: "'Orbitron',monospace", fontWeight: 700 }}>{children}</div>;
+
+// iOS-compatible copy button
+function CopyBtn({ text, label = "📋  COPY POST" }) {
+  const [state, setState] = useState("idle"); // idle | copying | done | fail
+  const textRef = useRef(null);
+
+  const handleCopy = async () => {
+    setState("copying");
+    const ok = await copyToClipboard(text);
+    setState(ok ? "done" : "fail");
+    setTimeout(() => setState("idle"), 2500);
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button onClick={handleCopy}
+        style={btn(state === "done" ? C.bull : state === "fail" ? C.bear : C.gold, { width: "100%", fontSize: 14, padding: "15px" })}>
+        {state === "copying" ? "COPYING..." : state === "done" ? "✓  COPIED!" : state === "fail" ? "SELECT BELOW ↓" : label}
+      </button>
+      {/* Fallback: visible selectable textarea for manual copy */}
+      {state === "fail" && (
+        <textarea
+          ref={textRef}
+          readOnly
+          value={text}
+          onFocus={e => e.target.select()}
+          style={{ marginTop: 8, width: "100%", height: 120, background: C.bg, border: `1px solid ${C.gold}`, borderRadius: 8, color: C.text, fontSize: 12, padding: "10px", fontFamily: "'Share Tech Mono',monospace", resize: "none", boxSizing: "border-box" }}
+        />
+      )}
+    </div>
+  );
+}
+
+function Spin({ text }) {
+  const [d, setD] = useState(".");
+  useEffect(() => { const t = setInterval(() => setD(x => x.length >= 3 ? "." : x + "."), 500); return () => clearInterval(t); }, []);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0" }}>
+      <div style={{ width: 9, height: 9, borderRadius: "50%", background: C.gold, animation: "pulse 0.9s infinite", flexShrink: 0 }} />
+      <span style={{ color: C.gold, fontSize: 13, fontFamily: "'Share Tech Mono',monospace" }}>{text}{d}</span>
+    </div>
+  );
+}
+
+function PostBox({ content, streaming }) {
+  if (!content && !streaming) return null;
+  const confMatch = content.match(/CONF:\s*(\d+)%/) || content.match(/CONFIDENCE:\s*(\d+)%/);
+  const confidence = confMatch ? parseInt(confMatch[1]) : null;
+  const confColor = confidence >= 75 ? C.bull : confidence >= 60 ? C.gold : C.bear;
+  return (
+    <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, padding: 18, marginTop: 14 }}>
+      {confidence && !streaming && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: "10px 14px", background: confColor + "12", border: `1px solid ${confColor}40`, borderRadius: 8 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, color: C.mid, marginBottom: 3, fontFamily: "'Orbitron',monospace" }}>CONFIDENCE</div>
+            <div style={{ height: 6, background: C.border, borderRadius: 3 }}>
+              <div style={{ height: "100%", width: `${confidence}%`, background: confColor, borderRadius: 3 }} />
+            </div>
+          </div>
+          <div style={{ fontFamily: "'Orbitron',monospace", fontWeight: 900, fontSize: 22, color: confColor }}>{confidence}%</div>
+        </div>
+      )}
+      <Lbl>Generated Post</Lbl>
+      <pre style={{ margin: 0, fontSize: 13, color: C.text, lineHeight: 1.9, whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", fontFamily: "'Share Tech Mono',monospace", maxHeight: 500, overflowY: "auto", width: "100%", boxSizing: "border-box" }}>
+        {content}{streaming && <span style={{ color: C.gold, animation: "blink 0.7s infinite" }}>▋</span>}
+      </pre>
+      {content && !streaming && <div style={{ marginTop: 16 }}><CopyBtn text={content} /></div>}
+    </div>
+  );
+}
+
+function ImgUpload({ label, onFile, preview, hint }) {
+  const ref = useRef();
+  return (
+    <div>
+      <Lbl>{label}</Lbl>
+      <div onClick={() => ref.current.click()}
+        style={{ border: `2px dashed ${preview ? C.gold : C.border}`, borderRadius: 12, cursor: "pointer", background: C.bg, minHeight: preview ? "auto" : 100, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+        {preview
+          ? <img src={preview} alt="" style={{ width: "100%", display: "block", maxHeight: 220, objectFit: "contain", padding: 8 }} />
+          : <div style={{ color: C.mid, fontSize: 13, padding: 20, textAlign: "center" }}>{hint}</div>}
+      </div>
+      <input ref={ref} type="file" accept="image/*" style={{ display: "none" }}
+        onChange={e => { const f = e.target.files[0]; if (f) onFile(f); e.target.value = ""; }} />
+    </div>
+  );
+}
+
+function PostSchedule({ tradeCount }) {
+  const h = vnHour();
+  const RAW = [
+    { time: "08:00–09:00", label: "MORNING SETUP",  type: "setup",   start: 8,  end: 9  },
+    { time: "14:00–15:00", label: "MIDDAY UPDATE",  type: "update",  start: 14, end: 15 },
+    { time: "20:00–22:00", label: "EVENING FLEX",   type: "flex",    start: 20, end: 22 },
+    { time: "22:00–23:00", label: "DAILY SUMMARY",  type: "winrate", start: 22, end: 23 },
+  ];
+  // Mark active (now) or next-upcoming so something always glows
+  const activeIdx = RAW.findIndex(s => h >= s.start && h < s.end);
+  const nextIdx   = activeIdx === -1
+    ? RAW.findIndex(s => s.start > h) === -1
+      ? 0  // all passed today → wrap to first (tomorrow)
+      : RAW.findIndex(s => s.start > h)
+    : -1;
+  const slots = RAW.map((s, i) => ({
+    ...s,
+    on:   i === activeIdx,
+    next: i === nextIdx,
+  }));
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <Lbl c={C.gold}>⛩ Lịch Đăng Bài Tối Ưu</Lbl>
+      {slots.map((s, i) => (
+        <div key={i} style={{
+          position: "relative",
+          display: "flex", alignItems: "center", gap: 12,
+          padding: s.on ? "14px 16px" : s.next ? "11px 14px" : "8px 12px",
+          marginBottom: s.on ? 10 : 6,
+          borderRadius: 12,
+          background: s.on
+            ? `linear-gradient(90deg, rgba(240,185,11,0.15) 0%, rgba(240,185,11,0.06) 60%, transparent 100%)`
+            : s.next
+            ? `linear-gradient(90deg, rgba(240,185,11,0.07) 0%, transparent 80%)`
+            : "transparent",
+          border: s.on
+            ? `2px solid ${C.gold}`
+            : s.next
+            ? `1px solid rgba(240,185,11,0.45)`
+            : `1px solid ${C.border}`,
+          boxShadow: s.on
+            ? `0 0 20px rgba(240,185,11,0.60), 0 0 40px rgba(240,185,11,0.28), inset 0 0 12px rgba(240,185,11,0.18)`
+            : s.next
+            ? `0 0 10px rgba(240,185,11,0.22), 0 0 22px rgba(240,185,11,0.10)`
+            : "none",
+          animation: s.on ? "roninGlow 1.8s ease-in-out infinite" : "none",
+          transition: "all 0.3s ease",
+        }}>
+          {/* Left neon bar */}
+          {(s.on || s.next) && (
+            <div style={{
+              position: "absolute", left: 0, top: 6, bottom: 6, width: 3,
+              background: s.on ? C.gold : `rgba(240,185,11,0.45)`, borderRadius: 2,
+              boxShadow: s.on ? `0 0 10px ${C.gold}, 0 0 22px rgba(240,185,11,0.7)` : "none",
+            }} />
+          )}
+          <div style={{
+            width: s.on ? 12 : s.next ? 9 : 7, height: s.on ? 12 : s.next ? 9 : 7, borderRadius: "50%",
+            background: s.on ? C.gold : s.next ? `rgba(240,185,11,0.55)` : C.border, flexShrink: 0,
+            boxShadow: s.on ? `0 0 8px ${C.gold}, 0 0 16px rgba(240,185,11,0.7)` : "none",
+            animation: s.on ? "roninDot 1s ease-in-out infinite" : s.next ? "roninDotDim 2.4s ease-in-out infinite" : "none",
+          }} />
+          <span style={{
+            fontSize: s.on ? 14 : s.next ? 13 : 12,
+            color: s.on ? C.gold : s.next ? `rgba(240,185,11,0.70)` : C.mid,
+            minWidth: 110,
+            fontWeight: s.on ? 900 : s.next ? 600 : 400,
+            letterSpacing: s.on ? 0.8 : 0,
+            fontFamily: (s.on || s.next) ? "'Orbitron',monospace" : "inherit",
+            textShadow: s.on ? `0 0 10px rgba(240,185,11,0.8), 0 0 20px rgba(240,185,11,0.4)` : "none",
+          }}>
+            {s.time}
+          </span>
+          <span style={{
+            fontSize: s.on ? 13 : 12,
+            color: s.on ? C.gold : s.next ? `rgba(240,185,11,0.65)` : C.mid,
+            flex: 1,
+            fontWeight: s.on ? 700 : s.next ? 500 : 400,
+            textShadow: s.on ? `0 0 8px rgba(240,185,11,0.6)` : "none",
+          }}>
+            {s.label}
+          </span>
+          {(s.on || s.next) && (
+            <span style={{
+              fontSize: 10,
+              background: s.on ? C.gold : "transparent",
+              color: s.on ? C.bg : `rgba(240,185,11,0.70)`,
+              border: s.on ? "none" : `1px solid rgba(240,185,11,0.50)`,
+              padding: "4px 13px",
+              borderRadius: 6,
+              fontWeight: 900,
+              fontFamily: "'Orbitron',monospace",
+              letterSpacing: 1.5,
+              boxShadow: s.on ? `0 0 10px rgba(240,185,11,0.8), 0 0 20px rgba(240,185,11,0.5)` : "none",
+              animation: s.on ? "roninBadge 1.2s ease-in-out infinite" : "none",
+            }}>
+              {s.on ? "NOW ▶" : "NEXT"}
+            </span>
+          )}
+        </div>
+      ))}
+      <div style={{ marginTop: 10, fontSize: 12, color: C.mid, display: "flex", alignItems: "center", gap: 8 }}>
+        <span>Bài hôm nay:</span>
+        <span style={{ color: tradeCount >= 3 ? C.bull : C.gold, fontWeight: 700, fontSize: 14, fontFamily: "'Orbitron',monospace" }}>{tradeCount} / 3–4</span>
+        <span style={{ color: C.border }}>|</span>
+        <span>Tối đa 5 bài / ngày</span>
+      </div>
+    </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SETUP TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function SetupTab({ onUsePost, usedCount }) {
+  const [mode, setMode] = useState("scan");
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [posts, setPosts] = useState([]); // [{token, bias, content, chartImg, used}]
+  const [expanded, setExpanded] = useState({});
+  const [streaming, setStreaming] = useState(false);
+  const [streamingIdx, setStreamingIdx] = useState(null);
+  const [liveText, setLiveText] = useState("");
+  const [err, setErr] = useState("");
+  const [chartLoading, setChartLoading] = useState({});
+
+  const processToken = async (tok, idx, tradeType = "swing") => {
+    setStreamingIdx(idx);
+    let postContent = "";
+    postContent = await generateSetupPost(tok, setStatus, (t) => {
+      setLiveText(t); postContent = t;
+    }, tradeType);
+    const bias = postContent.includes("BEARISH") ? "SHORT" : "LONG";
+    const newPost = { token: tok, bias, content: postContent, chartImg: null, used: false };
+    return newPost;
+  };
+
+  const genChart = async (post, idx) => {
+    setChartLoading(prev => ({ ...prev, [idx]: true }));
+    try {
+      const img = await generateChartImage(post.content, post.token, post.bias);
+      setPosts(prev => prev.map((p, i) => i === idx ? { ...p, chartImg: img } : p));
+    } catch {}
+    setChartLoading(prev => ({ ...prev, [idx]: false }));
+  };
+
+  const doScan = async () => {
+    const ak = getAnthropicKey();
+    if (!ak) { setErr("⚠️ Chưa có Anthropic API key — vào tab API để nhập key trước."); return; }
+    setBusy(true); setPosts([]); setExpanded({}); setErr(""); setLiveText(""); setStreaming(false);
+
+    // Step 1: Shuffle and pick 5 candidates
+    const candidates = [...TOP_COINS].sort(() => Math.random() - 0.5).slice(0, 5);
+    setStatus(`📡 Scanning ${candidates.join(", ")} for best setup...`);
+
+    // Step 2: Fetch live data for all 5 in parallel — pick best signal
+    let bestToken = candidates[0];
+    try {
+      const snapshots = await Promise.allSettled(
+        candidates.map(sym => fetchMarketData(sym).then(d => ({ sym, ...d })))
+      );
+      const valid = snapshots
+        .filter(r => r.status === "fulfilled" && r.value.price > 0)
+        .map(r => r.value);
+
+      if (valid.length > 0) {
+        // Score each coin: strong trend + high volume + OI growth = best setup
+        const scored = valid.map(d => {
+          const trendScore = Math.abs(d.change24h);          // momentum
+          const volScore   = Math.min(d.vol24h / 1e8, 10);  // cap at 10
+          const fundingPenalty = Math.abs(d.funding * 100) > 0.05 ? 3 : 0; // extreme funding = risky
+          return { sym: d.sym, score: trendScore * 2 + volScore - fundingPenalty };
+        });
+        scored.sort((a, b) => b.score - a.score);
+        bestToken = scored[0].sym;
+        setStatus(`🎯 Best setup: $${bestToken} (score: ${scored[0].score.toFixed(1)}) · Generating...`);
+      }
+    } catch {}
+
+    // Step 3: Generate post for the best token
+    try {
+      setStreaming(true); setLiveText("");
+      const post = await processToken(bestToken, 0, "swing");
+      setPosts([post]);
+      setStreaming(false); setLiveText("");
+    } catch (e) {
+      setStreaming(false);
+      setErr("Lỗi: " + (e.message || "unknown"));
+    }
+    setBusy(false); setStatus(""); setStreaming(false); setLiveText("");
+  };
+
+  const doManual = async () => {
+    if (!token.trim()) return;
+    const ak = getAnthropicKey();
+    if (!ak) { setErr("⚠️ Chưa có Anthropic API key — vào tab API để nhập key trước."); return; }
+    setBusy(true); setPosts([]); setExpanded({}); setErr(""); setLiveText("");
+    setStreaming(true);
+    try {
+      // Manual scan = meme/low-cap mode
+      const post = await processToken(token.trim().toUpperCase(), 0, "meme");
+      setPosts([post]);
+      setStreaming(false);
+    } catch (e) { setErr("Lỗi: " + (e.message || "Failed. Tap again.")); setStreaming(false); }
+    setBusy(false); setStatus(""); setLiveText("");
+  };
+
+  const usePost = (post, idx) => {
+    if (post.used) return;
+    setPosts(prev => prev.map((p, i) => i === idx ? { ...p, used: true } : p));
+    onUsePost({ id: Date.now(), token: post.token, bias: post.bias, content: post.content, time: vnTime(), result: null });
+  };
+
+  return (
+    <div>
+      <PostSchedule tradeCount={usedCount} />
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        {[["scan", "🔍 TOP COINS"], ["manual", "⚡ MANUAL"]].map(([m, l]) => (
+          <button key={m} onClick={() => { setMode(m); setPosts([]); setExpanded({}); setErr(""); setLiveText(""); }}
+            style={{ ...btn(mode === m ? C.gold : C.mid), flex: 1, background: mode === m ? C.gold + "22" : "transparent" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <Card style={{ marginBottom: 14 }}>
+        {mode === "scan" ? (
+          <>
+            <button onClick={doScan} disabled={busy}
+              style={btn(C.gold, { width: "100%", fontSize: 14, padding: "16px", opacity: busy ? 0.55 : 1 })}>
+              {busy ? "SCANNING..." : "🔍  SCAN 1 TOP COIN"}
+            </button>
+            {busy && <Spin text={status || "Starting scan"} />}
+            {!busy && !err && (
+              <div style={{ fontSize: 12, color: C.mid, marginTop: 10, lineHeight: 1.8 }}>
+                Picks 1 random top coin · Searches live data<br />
+                Auto Long/Short · Real price levels · Confidence %
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <input value={token} onChange={e => setToken(e.target.value.toUpperCase())}
+              placeholder="BTC, ETH, SOL, BNB, SIGN..."
+              onKeyDown={e => e.key === "Enter" && !busy && doManual()}
+              style={inp({ marginBottom: 12 })} />
+            <button onClick={doManual} disabled={busy || !token.trim()}
+              style={btn(C.gold, { width: "100%", fontSize: 14, padding: "16px", opacity: (busy || !token.trim()) ? 0.55 : 1 })}>
+              {busy ? "ANALYZING..." : "⚡  ANALYZE TOKEN"}
+            </button>
+            {busy && <Spin text={status || "Fetching live data"} />}
+          </>
+        )}
+
+        {streaming && liveText && (
+          <div style={{ marginTop: 12, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 }}>
+            <Lbl>Writing post</Lbl>
+            <pre style={{ margin: 0, fontSize: 12, color: C.text, lineHeight: 1.8, whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", fontFamily: "'Share Tech Mono',monospace", maxHeight: 180, overflow: "hidden", width: "100%", boxSizing: "border-box" }}>
+              {liveText}<span style={{ color: C.gold, animation: "blink 0.7s infinite" }}>▋</span>
+            </pre>
+          </div>
+        )}
+        {err && (
+          <div style={{ marginTop: 12, padding: "14px", background: "#2D1010", border: `1px solid ${C.bear}50`, borderRadius: 10, fontSize: 13, color: C.bear }}>⚠️ {err}</div>
+        )}
+      </Card>
+
+      {posts.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {posts.map((p, i) => (
+            <Card key={i} style={{ opacity: p.used ? 0.7 : 1 }}>
+              {/* Header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontFamily: "'Orbitron',monospace", fontWeight: 900, fontSize: 18, color: p.used ? C.mid : C.text }}>${p.token}</span>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  {p.used && <span style={{ fontSize: 10, color: C.bull, background: C.bull + "20", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>✓ USED</span>}
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 6, color: p.bias === "LONG" ? C.bull : C.bear, background: (p.bias === "LONG" ? C.bull : C.bear) + "20" }}>
+                    {p.bias === "LONG" ? "▲ LONG" : "▼ SHORT"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Confidence bar */}
+              {(() => {
+                const cm = p.content.match(/CONF:\s*(\d+)%/) || p.content.match(/CONFIDENCE:\s*(\d+)%/);
+                if (!cm) return null;
+                const conf = parseInt(cm[1]);
+                const cc = conf >= 75 ? C.bull : conf >= 60 ? C.gold : C.bear;
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: "8px 12px", background: cc + "12", border: `1px solid ${cc}30`, borderRadius: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 8, color: C.mid, marginBottom: 3, fontFamily: "'Orbitron',monospace" }}>CONFIDENCE</div>
+                      <div style={{ height: 5, background: C.border, borderRadius: 3 }}>
+                        <div style={{ height: "100%", width: `${conf}%`, background: cc, borderRadius: 3 }} />
+                      </div>
+                    </div>
+                    <div style={{ fontFamily: "'Orbitron',monospace", fontWeight: 900, fontSize: 20, color: cc }}>{conf}%</div>
+                  </div>
+                );
+              })()}
+
+              {/* Post preview */}
+              <pre style={{
+                margin: 0, fontSize: 12, color: C.text, lineHeight: 1.8, whiteSpace: "pre-wrap",
+                wordBreak: "break-word", overflowWrap: "anywhere",
+                fontFamily: "'Share Tech Mono',monospace",
+                width: "100%", boxSizing: "border-box",
+                maxHeight: expanded[i] ? 600 : 100, overflow: "hidden",
+                maskImage: !expanded[i] ? "linear-gradient(to bottom, black 40%, transparent 100%)" : "none",
+                WebkitMaskImage: !expanded[i] ? "linear-gradient(to bottom, black 40%, transparent 100%)" : "none",
+              }}>
+                {p.content}
+              </pre>
+
+              {/* Chart image */}
+              {p.chartImg && (
+                <div style={{ marginTop: 12 }}>
+                  <img src={p.chartImg} alt="chart" style={{ width: "100%", borderRadius: 8, display: "block" }} />
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    {/* Universal save: Web Share API (iOS/Android) → fallback open in tab */}
+                    <button onClick={async () => {
+                      try {
+                        const blob = await (await fetch(p.chartImg)).blob();
+                        const file = new File([blob], `${p.token}_chart.jpg`, { type: "image/jpeg" });
+                        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                          await navigator.share({ files: [file], title: `${p.token} — FXRonin` });
+                          return;
+                        }
+                      } catch {}
+                      // Fallback: open blob URL in new tab (iOS Safari → long-press → Save Image)
+                      window.open(p.chartImg, "_blank");
+                    }} style={btn(C.gold, { flex: 1, fontSize: 12 })}>
+                      {/iPhone|iPad|iPod/i.test(navigator.userAgent) ? "📤 LƯU / SHARE" : "📤 SHARE / DOWNLOAD"}
+                    </button>
+                    <a href={p.chartImg} download={`${p.token}_chart.jpg`}
+                      style={{ flex: 1, display: "block", ...btn(C.bull, { textAlign: "center", textDecoration: "none", fontSize: 11 }) }}>
+                      ⬇️ DOWNLOAD
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setExpanded(prev => ({ ...prev, [i]: !prev[i] }))}
+                    style={btn(C.mid, { flex: 1, fontSize: 11 })}>
+                    {expanded[i] ? "▲ COLLAPSE" : "▼ EXPAND"}
+                  </button>
+                  {!p.chartImg && (
+                    <button onClick={() => genChart(p, i)} disabled={chartLoading[i]}
+                      style={btn("#38BDF8", { flex: 1, fontSize: 11, opacity: chartLoading[i] ? 0.5 : 1 })}>
+                      {chartLoading[i] ? "DRAWING..." : "📊 GEN CHART"}
+                    </button>
+                  )}
+                </div>
+                <CopyBtn text={p.content} />
+                {!p.used ? (
+                  <button onClick={() => usePost(p, i)}
+                    style={btn(C.bull, { width: "100%", fontSize: 13, padding: "13px" })}>
+                    ✅  USE THIS POST → ADD TO WINRATE
+                  </button>
+                ) : (
+                  <div style={{ textAlign: "center", fontSize: 12, color: C.bull, padding: "10px", background: C.bull + "10", borderRadius: 8 }}>
+                    ✓ Added to today's winrate tracker
+                  </div>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UPDATE TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function UpdateTab() {
+  const [pF, setPF] = useState(null); const [pP, setPP] = useState(null);
+  const [rF, setRF] = useState(null); const [rP, setRP] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [content, setContent] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const hf = (sf, sp) => async (f) => { sf(f); const r = new FileReader(); r.onload = e => sp(e.target.result); r.readAsDataURL(f); };
+  const gen = async () => {
+    if (!pF || !rF) return;
+    setBusy(true); setContent(""); setStreaming(true);
+    try {
+      const [p64, r64] = await Promise.all([toBase64(pF), toBase64(rF)]);
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001", max_tokens: 1000,
+          system: UPDATE_SYSTEM,
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: pF.type || "image/png", data: p64 } },
+            { type: "image", source: { type: "base64", media_type: rF.type || "image/png", data: r64 } },
+            { type: "text", text: "Image 1 = original trade plan (entry/TP/SL). Image 2 = current result. Write the update post." },
+          ]}], stream: true,
+        }),
+      });
+      const reader = res.body.getReader(); const dec = new TextDecoder(); let full = "";
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        for (const line of dec.decode(value).split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          try { const d = JSON.parse(line.slice(6)); if (d.type === "content_block_delta" && d.delta?.type === "text_delta") { full += d.delta.text; setContent(full); } } catch {}
+        }
+      }
+      setStreaming(false);
+    } catch (e) { setContent(`Error: ${e.message}`); setStreaming(false); }
+    setBusy(false);
+  };
+  return (
+    <div>
+      <Card style={{ marginBottom: 14 }}>
+        <Lbl c={C.gold}>Update Plan — 2 Ảnh</Lbl>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <ImgUpload label="📌 Ảnh Plan Cũ" onFile={hf(setPF, setPP)} preview={pP} hint="📎 Tap để upload ảnh plan gốc" />
+          <ImgUpload label="📊 Ảnh Kết Quả Hiện Tại" onFile={hf(setRF, setRP)} preview={rP} hint="📎 Tap để upload ảnh kết quả" />
+          <button onClick={gen} disabled={busy || !pF || !rF}
+            style={btn(C.gold, { width: "100%", fontSize: 14, padding: "16px", opacity: (!pF || !rF || busy) ? 0.5 : 1 })}>
+            {busy ? "ANALYZING..." : "🛫  GENERATE UPDATE POST"}
+          </button>
+          {busy && <Spin text="Reading chart images" />}
+          {(!pF || !rF) && <div style={{ fontSize: 12, color: C.mid, textAlign: "center" }}>Upload cả 2 ảnh để generate</div>}
+        </div>
+      </Card>
+      {(content || streaming) && <Card><PostBox content={content} streaming={streaming} /></Card>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FLEX TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function FlexTab() {
+  const [file, setFile] = useState(null); const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false); const [content, setContent] = useState(""); const [streaming, setStreaming] = useState(false);
+  const hf = async (f) => { setFile(f); const r = new FileReader(); r.onload = e => setPreview(e.target.result); r.readAsDataURL(f); };
+  const gen = async () => {
+    if (!file) return;
+    setBusy(true); setContent(""); setStreaming(true);
+    try {
+      const b64 = await toBase64(file);
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001", max_tokens: 1000, system: FLEX_SYSTEM,
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: file.type || "image/png", data: b64 } },
+            { type: "text", text: "Read this PnL screenshot. Extract every number: profit %, USDT amount, entry price, exit price, token, leverage. Write the flex post." },
+          ]}], stream: true,
+        }),
+      });
+      const reader = res.body.getReader(); const dec = new TextDecoder(); let full = "";
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        for (const line of dec.decode(value).split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          try { const d = JSON.parse(line.slice(6)); if (d.type === "content_block_delta" && d.delta?.type === "text_delta") { full += d.delta.text; setContent(full); } } catch {}
+        }
+      }
+      setStreaming(false);
+    } catch (e) { setContent(`Error: ${e.message}`); setStreaming(false); }
+    setBusy(false);
+  };
+  return (
+    <div>
+      <Card style={{ marginBottom: 14 }}>
+        <Lbl c={C.gold}>Flex / Close Post</Lbl>
+        <ImgUpload label="💰 PnL Screenshot" onFile={hf} preview={preview} hint="📎 Tap để upload ảnh kết quả lệnh" />
+        <button onClick={gen} disabled={busy || !file}
+          style={btn(C.gold, { width: "100%", fontSize: 14, padding: "16px", marginTop: 16, opacity: (!file || busy) ? 0.5 : 1 })}>
+          {busy ? "READING IMAGE..." : "💎  GENERATE FLEX POST"}
+        </button>
+        {busy && <Spin text="Extracting PnL data" />}
+      </Card>
+      {(content || streaming) && <Card><PostBox content={content} streaming={streaming} /></Card>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SETTINGS TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function SettingsTab({ apiKey, secret, onSave }) {
+  const [k, setK] = useState(apiKey || "");
+  const [s, setS] = useState(secret || "");
+  const [showS, setShowS] = useState(false);
+  const [msg, setMsg] = useState("");
+  const saved = !!(apiKey && secret);
+
+  // Anthropic API key (for standalone web — not needed in Binance MiniApp)
+  const [aKey, setAKey] = useState(() => { try { return localStorage.getItem("fxr_anthropic_key") || ""; } catch { return ""; } });
+  const [showAKey, setShowAKey] = useState(false);
+  const [aMsg, setAMsg] = useState("");
+  const aSaved = aKey.length > 20;
+
+  const saveAnthropicKey = () => {
+    if (!aKey.trim()) { setAMsg("❌ Nhập API key"); return; }
+    if (aKey.trim().length < 20 || !aKey.trim().startsWith("sk-")) {
+      setAMsg("❌ Key không hợp lệ (phải bắt đầu bằng sk-)"); return;
+    }
+    try { localStorage.setItem("fxr_anthropic_key", aKey.trim()); } catch {}
+    setAMsg("✅ Đã lưu — tất cả tính năng AI sẵn sàng");
+  };
+  const clearAnthropicKey = () => {
+    setAKey(""); setAMsg("");
+    try { localStorage.removeItem("fxr_anthropic_key"); } catch {}
+  };
+
+  const testAnthropicKey = async () => {
+    const key = aKey.trim() || getAnthropicKey();
+    if (!key) { setAMsg("❌ Nhập key trước"); return; }
+    setAMsg("🔄 Đang test kết nối...");
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 5,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+      if (res.ok) {
+        setAMsg("✅ Key hoạt động! Mọi tính năng đã sẵn sàng.");
+      } else {
+        let errMsg = `HTTP ${res.status}`;
+        try { const d = await res.json(); errMsg = d.error?.message || d.message || errMsg; } catch {}
+        setAMsg(`❌ API lỗi: ${errMsg}`);
+      }
+    } catch (e) {
+      setAMsg(`❌ Network lỗi: ${e.message} — Có thể CORS hoặc mất mạng`);
+    }
+  };
+
+  const save = () => {
+    const err = validateKeyFormat(k.trim(), s.trim());
+    if (err) { setMsg("❌ " + err); return; }
+    onSave(k.trim(), s.trim());
+    setMsg("✅ Đã lưu thành công");
+  };
+
+  const clear = () => {
+    setK(""); setS(""); setMsg("");
+    onSave("", "");
+  };
+
+  const features = [
+    ["Auto WIN/LOSS từ lịch sử lệnh", "⚠️", "Giới hạn do CSP MiniApp"],
+    ["Market data (giá, OI, funding)", "✅", "Hoạt động đầy đủ"],
+    ["Tạo post & chart", "✅", "Không cần API"],
+    ["Winrate tracking thủ công", "✅", "Luôn hoạt động"],
+    ["Daily Summary AI", "✅", "Không cần API"],
+  ];
+
+  return (
+    <div>
+      {/* ── Anthropic API Key (bắt buộc cho web standalone) ── */}
+      <Card style={{ marginBottom: 14, border: `1px solid ${aSaved ? C.bull+"44" : C.purple+"55"}` }}>
+        <Lbl c={C.purple}>🤖 Anthropic API Key — Bắt buộc</Lbl>
+        <div style={{ fontSize: 11, color: C.mid, marginBottom: 14, lineHeight: 1.6 }}>
+          Cần thiết khi dùng trên web/điện thoại.<br/>
+          Lấy key miễn phí tại{" "}
+          <a href="https://console.anthropic.com/keys" target="_blank"
+            style={{ color: C.purple, textDecoration: "underline" }}>
+            console.anthropic.com
+          </a>
+        </div>
+
+        <div style={{ marginBottom: 14, position: "relative" }}>
+          <div style={{ fontSize: 10, color: C.mid, marginBottom: 6, letterSpacing: 1 }}>API KEY (sk-ant-...)</div>
+          <input
+            type={showAKey ? "text" : "password"}
+            value={aKey}
+            onChange={e => { setAKey(e.target.value); setAMsg(""); }}
+            placeholder="sk-ant-api03-..."
+            style={{ ...inp(), fontSize: 12, paddingRight: 48 }}
+          />
+          <button onClick={() => setShowAKey(x => !x)} style={{
+            position: "absolute", right: 10, bottom: 10,
+            background: "none", border: "none", color: C.mid, cursor: "pointer", fontSize: 14,
+          }}>{showAKey ? "🙈" : "👁"}</button>
+        </div>
+
+        <div style={{ display: "flex", gap: 9 }}>
+          <button onClick={saveAnthropicKey} disabled={!aKey}
+            style={btn(C.purple, { flex: 1, opacity: !aKey ? 0.5 : 1, fontSize: 13, padding: "13px" })}>
+            💾 LƯU
+          </button>
+          <button onClick={testAnthropicKey} disabled={!aKey && !aSaved}
+            style={btn(C.blue, { flex: 1, opacity: (!aKey && !aSaved) ? 0.5 : 1, fontSize: 13, padding: "13px" })}>
+            🔌 TEST
+          </button>
+          {aSaved && (
+            <button onClick={clearAnthropicKey} style={btn(C.bear, { fontSize: 11, padding: "13px 12px" })}>XÓA</button>
+          )}
+        </div>
+
+        {aMsg && (
+          <div style={{
+            marginTop: 10, fontSize: 12, padding: "9px 12px", borderRadius: 8,
+            color: aMsg.startsWith("✅") ? C.bull : aMsg.startsWith("🔄") ? C.gold : C.bear,
+            background: C.bg,
+            border: `1px solid ${aMsg.startsWith("✅") ? C.bull : aMsg.startsWith("🔄") ? C.gold : C.bear}44`,
+            wordBreak: "break-word",
+          }}>{aMsg}</div>
+        )}
+
+        {aSaved && !aMsg && (
+          <div style={{ marginTop: 10, fontSize: 11, color: C.bull, display: "flex", alignItems: "center", gap: 6 }}>
+            <span>✅</span> Key đã lưu — bấm TEST để kiểm tra kết nối
+          </div>
+        )}
+      </Card>
+
+      {/* Status banner Binance */}
+      <div style={{
+        marginBottom: 14, padding: "12px 16px", borderRadius: 10,
+        background: saved ? "#16a34a18" : "#d9770618",
+        border: `1px solid ${saved ? C.bull : C.gold}44`,
+        display: "flex", alignItems: "center", gap: 10,
+      }}>
+        <span style={{ fontSize: 20 }}>{saved ? "🔑" : "🔓"}</span>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: saved ? C.bull : C.gold }}>
+            {saved ? "Binance API đã kết nối" : "Chưa cấu hình Binance API"}
+          </div>
+          <div style={{ fontSize: 11, color: C.mid, marginTop: 2 }}>
+            {saved ? "Market data & sync đã sẵn sàng" : "Tùy chọn — để auto sync WIN/LOSS"}
+          </div>
+        </div>
+      </div>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Lbl c={C.gold}>⚙️ Binance API — Read Only (Tùy chọn)</Lbl>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, color: C.mid, marginBottom: 6, letterSpacing: 1 }}>API KEY</div>
+          <input
+            value={k} onChange={e => { setK(e.target.value); setMsg(""); }}
+            placeholder="Paste API Key..."
+            style={{ ...inp(), fontSize: 12, letterSpacing: 0.5 }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 10, color: C.mid, marginBottom: 6, letterSpacing: 1 }}>SECRET KEY</div>
+          <div style={{ position: "relative" }}>
+            <input
+              type={showS ? "text" : "password"}
+              value={s} onChange={e => { setS(e.target.value); setMsg(""); }}
+              placeholder="Paste Secret Key..."
+              style={{ ...inp(), fontSize: 12, paddingRight: 48 }}
+            />
+            <button onClick={() => setShowS(x => !x)} style={{
+              position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+              background: "none", border: "none", color: C.mid, cursor: "pointer", fontSize: 14,
+            }}>{showS ? "🙈" : "👁"}</button>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 9 }}>
+          <button onClick={save} disabled={!k || !s}
+            style={btn(C.gold, { flex: 1, opacity: (!k || !s) ? 0.5 : 1, fontSize: 14, padding: "14px" })}>
+            💾 LƯU KEY
+          </button>
+          {saved && (
+            <button onClick={clear} style={btn(C.bear, { fontSize: 11, padding: "14px 16px" })}>XÓA</button>
+          )}
+        </div>
+
+        {msg && (
+          <div style={{
+            marginTop: 12, fontSize: 12,
+            color: msg.startsWith("✅") ? C.bull : C.bear,
+            padding: "10px 12px", background: C.bg, borderRadius: 8,
+            border: `1px solid ${msg.startsWith("✅") ? C.bull : C.bear}44`,
+          }}>
+            {msg}
+          </div>
+        )}
+
+        <div style={{ marginTop: 14, fontSize: 11, color: C.mid, lineHeight: 1.6 }}>
+          Chỉ dùng <span style={{ color: C.gold }}>Read-only key</span> · Key lưu cục bộ trên thiết bị
+        </div>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Lbl c={C.mid}>Tính năng</Lbl>
+        {features.map(([name, icon, note]) => (
+          <div key={name} style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "9px 0", borderBottom: `1px solid ${C.border}22`,
+          }}>
+            <div>
+              <div style={{ fontSize: 12, color: C.text }}>{name}</div>
+              <div style={{ fontSize: 10, color: C.mid, marginTop: 2 }}>{note}</div>
+            </div>
+            <span style={{ fontSize: 16, marginLeft: 12 }}>{icon}</span>
+          </div>
+        ))}
+      </Card>
+
+      <Card>
+        <Lbl c={C.mid}>Quyền cần thiết khi tạo key</Lbl>
+        {[
+          ["Futures Trading", "❌ Tắt"],
+          ["Read Info", "✅ Bật"],
+          ["IP Whitelist", "✅ Nên bật"],
+          ["Withdraw", "❌ Tắt"],
+        ].map(([l, v]) => (
+          <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0",
+            borderBottom: `1px solid ${C.border}22`, fontSize: 12 }}>
+            <span style={{ color: C.mid }}>{l}</span>
+            <span style={{ color: v.startsWith("✅") ? C.bull : C.bear, fontWeight: 600 }}>{v}</span>
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WINRATE TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function WinrateTab({ trades, onUpdate, onClear, apiKey, secret }) {
+  const [busy, setBusy]       = useState(false);
+  const [summary, setSummary] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [pnlMap, setPnlMap]   = useState({}); // token → { pnl, status }
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  const wins   = trades.filter(t => t.result === "WIN").length;
+  const losses = trades.filter(t => t.result === "LOSS").length;
+  const open   = trades.filter(t => !t.result).length;
+  const closed = wins + losses;
+  const wr     = closed > 0 ? Math.round(wins / closed * 100) : 0;
+  const wrc    = wr >= 65 ? C.bull : wr >= 45 ? C.gold : C.bear;
+  const hasApi = !!(apiKey && secret);
+
+  // ── Auto-sync from Binance ─────────────────────────────────────
+  const syncBinance = async () => {
+    if (!hasApi) return;
+    setSyncing(true); setSyncMsg("Đang kết nối Binance...");
+
+    // Step 1: public ping — xác nhận network OK (thử nhiều base URL)
+    let netOk = false;
+    try { await binancePublic("/fapi/v1/ping"); netOk = true; } catch {}
+    if (!netOk) {
+      setSyncMsg("⚠️ Binance API bị chặn trong môi trường này — mark thủ công bên dưới");
+      setSyncing(false); return;
+    }
+
+    // Step 2: thử signed request
+    try {
+      const positions = await binanceFutures("/fapi/v2/positionRisk", {}, apiKey, secret);
+      const openSet   = new Set(positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol));
+      const start     = todayStartMs();
+      const newPnl    = {};
+      let updated     = 0;
+
+      for (const token of [...new Set(trades.map(t => t.token))]) {
+        const symbol = `${token}USDT`;
+        setSyncMsg(`Đang kiểm tra $${token}...`);
+        let userTrades = [];
+        try {
+          userTrades = await binanceFutures("/fapi/v1/userTrades",
+            { symbol, startTime: start, limit: 200 }, apiKey, secret);
+        } catch { continue; }
+        if (!userTrades.length) continue;
+
+        const netPnl = userTrades.reduce((s, t) => s + parseFloat(t.realizedPnl || 0), 0);
+        const isOpen = openSet.has(symbol);
+        newPnl[token] = { pnl: netPnl, status: isOpen ? "OPEN" : netPnl > 0 ? "WIN" : netPnl < 0 ? "LOSS" : "BE" };
+
+        if (!isOpen && netPnl !== 0) {
+          const tradeEntry = trades.find(t => t.token === token && !t.result);
+          if (tradeEntry) { onUpdate(tradeEntry.id, netPnl > 0 ? "WIN" : "LOSS"); updated++; }
+        }
+      }
+      setPnlMap(newPnl);
+      setSyncMsg(`✅ Sync xong — ${updated} lệnh tự động cập nhật`);
+
+    } catch (e) {
+      if (e.message === "CORS_BLOCKED") {
+        // Public market data vẫn hoạt động — chỉ signed bị chặn
+        setSyncMsg("⚠️ CORS: mark thủ công bên dưới · Giá thị trường vẫn live");
+      } else {
+        setSyncMsg("❌ " + (e.message || "Lỗi Binance API"));
+      }
+    }
+    setSyncing(false);
+  };
+
+  const gen = async () => {
+    if (!trades.length) return;
+    setBusy(true); setSummary(""); setStreaming(true);
+    try {
+      const list = trades.map(t => {
+        // No USDT amounts in AI prompt — keep it neutral and location-free
+        const resultStr = t.result || "RUNNING";
+        return `${t.token} ${t.bias} ${resultStr}`;
+      }).join(" | ");
+      const sessionDate = new Date().toLocaleDateString("en-GB"); // dd/mm/yyyy — neutral format
+      await streamWrite(
+        `Session date: ${sessionDate}.\nTrades: ${list}\nStats: ${wins}W ${losses}L ${open} running. WR: ${wr}%.\nWrite the daily summary post.`,
+        WR_SYSTEM, setSummary
+      );
+      setStreaming(false);
+    } catch (e) { setSummary(`Error: ${e.message}`); setStreaming(false); }
+    setBusy(false);
+  };
+
+  return (
+    <div>
+      {/* Stats row */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 9, marginBottom: 16 }}>
+        {[
+          { l: "WIN RATE", v: wr > 0 ? `${wr}%` : "—", c: wrc, big: true },
+          { l: "WINS",     v: wins,   c: C.bull },
+          { l: "LOSSES",   v: losses, c: C.bear },
+          { l: "OPEN",     v: open,   c: C.gold },
+        ].map(s => (
+          <Card key={s.l} style={{ textAlign: "center", padding: "12px 6px" }}>
+            <div style={{ fontSize: 8, color: C.mid, marginBottom: 5, fontFamily: "'Orbitron',monospace", letterSpacing: 1.5 }}>{s.l}</div>
+            <div style={{ fontFamily: "'Orbitron',monospace", fontWeight: 900, fontSize: s.big ? 26 : 21, color: s.c }}>{s.v}</div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Binance sync bar */}
+      {hasApi && (
+        <div style={{ marginBottom: 14, padding: "12px 14px", background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, color: C.gold, fontFamily: "'Orbitron',monospace", fontWeight: 700, marginBottom: 3 }}>
+              🔗 BINANCE SYNC
+            </div>
+            {syncMsg && (
+              <div style={{ fontSize: 11, color: syncMsg.startsWith("✅") ? C.bull : syncMsg.startsWith("❌") ? C.bear : C.gold,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {syncMsg}
+              </div>
+            )}
+          </div>
+          <button onClick={syncBinance} disabled={syncing || !trades.length}
+            style={btn(C.gold, { fontSize: 11, padding: "10px 16px", opacity: syncing ? 0.5 : 1, flexShrink: 0 })}>
+            {syncing ? "SYNCING..." : "🔄 SYNC"}
+          </button>
+        </div>
+      )}
+
+      {/* Trade list */}
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <Lbl c={C.gold}>Trades Today</Lbl>
+          <span style={{ fontSize: 11, color: C.mid }}>{vnTime()}</span>
+        </div>
+
+        {trades.length === 0 ? (
+          <div style={{ textAlign: "center", color: C.mid, padding: "28px 0", fontSize: 14, lineHeight: 2 }}>
+            No trades yet.<br />Generate a setup and tap "USE THIS POST".
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {trades.map(t => {
+              const p = pnlMap[t.token];
+              const pnlColor = !p ? C.mid : p.pnl > 0 ? C.bull : p.pnl < 0 ? C.bear : C.mid;
+              return (
+                <div key={t.id} style={{ background: C.bg, border: `1px solid ${t.result === "WIN" ? C.bull + "40" : t.result === "LOSS" ? C.bear + "40" : C.border}`,
+                  borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 13, fontWeight: 700, color: C.text, minWidth: 52 }}>
+                      ${t.token}
+                    </span>
+                    <span style={{ fontSize: 10, color: t.bias === "LONG" ? C.bull : C.bear,
+                      background: (t.bias === "LONG" ? C.bull : C.bear) + "18", padding: "3px 8px", borderRadius: 5 }}>
+                      {t.bias === "LONG" ? "▲" : "▼"} {t.bias}
+                    </span>
+                    <span style={{ fontSize: 10, color: C.mid, flex: 1 }}>{t.time}</span>
+                    {/* Quick-mark buttons — faster than dropdown, works without Binance API */}
+                    {[["WIN","✅",C.bull],["LOSS","❌",C.bear],["BE","➖",C.mid]].map(([val,icon,col]) => (
+                      <button key={val} onClick={() => onUpdate(t.id, t.result === val ? null : val)}
+                        style={{ background: t.result === val ? col + "28" : "transparent",
+                          border: `1px solid ${t.result === val ? col : C.border}`,
+                          borderRadius: 6, color: t.result === val ? col : C.mid,
+                          fontSize: 10, padding: "4px 9px", cursor: "pointer",
+                          fontFamily: "'Orbitron',monospace", fontWeight: 700,
+                          transition: "all 0.12s", touchAction: "manipulation",
+                          WebkitTapHighlightColor: "transparent" }}>
+                        {icon} {val}
+                      </button>
+                    ))}
+                  </div>
+                  {/* PnL row from Binance */}
+                  {p && (
+                    <div style={{ marginTop: 7, display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={{ fontSize: 10, color: C.mid }}>Realized PnL</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Orbitron',monospace", color: pnlColor }}>
+                        {p.pnl >= 0 ? "+" : ""}{p.pnl.toFixed(2)} USDT
+                      </span>
+                      <span style={{ fontSize: 10, color: p.status === "OPEN" ? C.gold : pnlColor,
+                        background: (p.status === "OPEN" ? C.gold : pnlColor) + "18",
+                        padding: "2px 8px", borderRadius: 4 }}>
+                        {p.status}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div style={{ height: 1, background: C.border, margin: "14px 0" }} />
+
+        {/* Inline confirm xóa — thay thế window.confirm() bị chặn trong MiniApp */}
+        {confirmClear ? (
+          <div style={{ background: C.bear + "14", border: `1px solid ${C.bear}55`,
+            borderRadius: 10, padding: "14px", marginBottom: 10 }}>
+            <div style={{ fontSize: 13, color: C.text, marginBottom: 12, textAlign: "center" }}>
+              Xóa toàn bộ {trades.length} lệnh hôm nay?
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { onClear(); setConfirmClear(false); }}
+                style={btn(C.bear, { flex: 1, fontSize: 12 })}>🗑 XÁC NHẬN XÓA</button>
+              <button onClick={() => setConfirmClear(false)}
+                style={btn(C.mid, { flex: 1, fontSize: 12 })}>HỦY</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={gen} disabled={busy || !trades.length}
+              style={btn(C.gold, { flex: 1, fontSize: 13, opacity: (busy || !trades.length) ? 0.5 : 1 })}>
+              {busy ? "WRITING..." : "📊  DAILY SUMMARY"}
+            </button>
+            {trades.length > 0 && (
+              <button onClick={() => setConfirmClear(true)}
+                style={btn(C.bear, { fontSize: 11 })}>CLEAR</button>
+            )}
+          </div>
+        )}
+        {busy && <Spin text="Writing daily wrap" />}
+      </Card>
+
+      {(summary || streaming) && <Card><PostBox content={summary} streaming={streaming} /></Card>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROOT APP
+// ═══════════════════════════════════════════════════════════════════════════════
+const TABS = [
+  { id: "setup",   icon: "🗡️", label: "SETUP"   },
+  { id: "update",  icon: "🛫", label: "UPDATE"  },
+  { id: "flex",    icon: "💎", label: "FLEX"    },
+  { id: "winrate", icon: "📊", label: "WINRATE" },
+  { id: "settings",icon: "⚙️", label: "API"     },
+];
+
+function App() {
+  const [tab, setTab]     = useState("setup");
+  const [trades, setTrades] = useState([]);
+  const [ready, setReady] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [secret, setSecret] = useState("");
+
+  // Load trades + API credentials on mount
+  useEffect(() => {
+    (async () => {
+      const s = await storeGet(todayKey());
+      if (s) setTrades(s);
+      // Load credentials from localStorage only (never from remote)
+      try {
+        const k = localStorage.getItem("fxr_binance_key")   || "";
+        const sc = localStorage.getItem("fxr_binance_secret") || "";
+        setApiKey(k); setSecret(sc);
+      } catch {}
+      setReady(true);
+    })();
+  }, []);
+
+  useEffect(() => { if (ready) storeSet(todayKey(), trades); }, [trades, ready]);
+
+  const saveCredentials = useCallback((k, s) => {
+    setApiKey(k); setSecret(s);
+    try {
+      localStorage.setItem("fxr_binance_key", k);
+      localStorage.setItem("fxr_binance_secret", s);
+    } catch {}
+  }, []);
+
+  const usePost  = useCallback(t => setTrades(p => [...p, t]), []);
+  const updTrade = useCallback((id, r) => setTrades(p => p.map(t => t.id === id ? { ...t, result: r } : t)), []);
+  const clearDay = useCallback(() => { setTrades([]); storeSet(todayKey(), []); }, []);
+
+  const wins   = trades.filter(t => t.result === "WIN").length;
+  const closed = wins + trades.filter(t => t.result === "LOSS").length;
+  const wr     = closed > 0 ? Math.round(wins / closed * 100) : 0;
+  const wrc    = wr >= 65 ? C.bull : wr >= 45 ? C.gold : C.bear;
+  const h      = vnHour();
+  const prime  = (h >= 8 && h < 9) || (h >= 14 && h < 15) || (h >= 20 && h < 23);
+
+  return (
+    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'Share Tech Mono',monospace" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Share+Tech+Mono&display=swap');
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: #0B0E11; }
+        ::-webkit-scrollbar-thumb { background: #2B3139; border-radius: 3px; }
+        input:focus { border-color: #F0B90B !important; box-shadow: 0 0 0 3px #F0B90B18; }
+        select option { background: #13171C; }
+        button:active { opacity: 0.65 !important; transform: scale(0.97); }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.15} }
+        @keyframes blink  { 0%,100%{opacity:1} 50%{opacity:0} }
+        @keyframes roninGlow {
+          0%,100% { box-shadow: 0 0 12px rgba(240,185,11,0.38), 0 0 24px rgba(240,185,11,0.19), inset 0 0 8px rgba(240,185,11,0.13); }
+          50%     { box-shadow: 0 0 24px rgba(240,185,11,0.72), 0 0 48px rgba(240,185,11,0.40), inset 0 0 16px rgba(240,185,11,0.25); }
+        }
+        @keyframes roninDot {
+          0%,100% { box-shadow: 0 0 6px rgba(240,185,11,0.9), 0 0 14px rgba(240,185,11,0.67); transform: scale(1); }
+          50%     { box-shadow: 0 0 16px rgba(240,185,11,1),   0 0 30px rgba(240,185,11,0.8);  transform: scale(1.3); }
+        }
+        @keyframes roninBadge {
+          0%,100% { box-shadow: 0 0 8px rgba(240,185,11,0.67); opacity: 1; }
+          50%     { box-shadow: 0 0 20px rgba(240,185,11,1), 0 0 36px rgba(240,185,11,0.5); opacity: 0.9; }
+        }
+        @keyframes roninDotDim {
+          0%,100% { opacity: 0.55; transform: scale(1); }
+          50%     { opacity: 1;    transform: scale(1.2); }
+        }
+      `}</style>
+
+      <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 100 }}>
+        <div style={{ display: "flex", alignItems: "center", padding: "13px 18px", gap: 13 }}>
+          <span style={{ fontSize: 24 }}>⛩</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: "'Orbitron',monospace", fontWeight: 900, fontSize: 15, color: C.gold, letterSpacing: 2 }}>FXRONIN</div>
+            <div style={{ fontSize: 9, color: C.mid, letterSpacing: 1.5 }}>CONTENT GENERATOR v6</div>
+          </div>
+          {prime && <div style={{ background: C.gold, borderRadius: 7, padding: "5px 13px" }}><span style={{ fontSize: 10, color: C.bg, fontWeight: 900, fontFamily: "'Orbitron',monospace" }}>● PRIME</span></div>}
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: C.mid }}>USED TODAY</div>
+            <div style={{ fontFamily: "'Orbitron',monospace", fontSize: 16, fontWeight: 700, color: wrc }}>
+              {closed > 0 ? `${wr}% WR` : `${trades.length} posts`}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", borderTop: `1px solid ${C.border}` }}>
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              style={{ flex: 1, background: "none", border: "none", borderBottom: `3px solid ${tab === t.id ? C.gold : "transparent"}`, color: tab === t.id ? C.gold : C.mid, padding: "10px 0 8px", cursor: "pointer", fontFamily: "'Orbitron',monospace", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, transition: "all 0.15s", touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}>
+              <div style={{ fontSize: 20, marginBottom: 3 }}>{t.icon}</div>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: "18px 16px 60px", maxWidth: 640, margin: "0 auto" }}>
+        {tab === "setup"    && <SetupTab onUsePost={usePost} usedCount={trades.length} />}
+        {tab === "update"   && <UpdateTab />}
+        {tab === "flex"     && <FlexTab />}
+        {tab === "winrate"  && <WinrateTab trades={trades} onUpdate={updTrade} onClear={clearDay} apiKey={apiKey} secret={secret} />}
+        {tab === "settings" && <SettingsTab apiKey={apiKey} secret={secret} onSave={saveCredentials} />}
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
