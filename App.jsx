@@ -787,41 +787,33 @@ function generateTradeCardImage(setup, currentPrice) {
       // ── BASE FILL ──
       ctx.fillStyle = "#060808"; ctx.fillRect(0, 0, W, H);
 
-      // ── RONIN PHOTO — cover-fit, offset down so warrior fills upper card ──
+      // ── RONIN PHOTO — cover-fit, large offY so warrior hat lands at ~8% of card ──
       if (bgImg) {
-        // CSS cover-fit: scale so image always fills full canvas width AND height
         const scale = Math.max(H / bgImg.height, W / bgImg.width);
         const drawW = bgImg.width  * scale;
         const drawH = bgImg.height * scale;
-        const offX  = (drawW - W) / 2;         // center crop horizontally
-        // Push warrior upward: crop 17% from top of scaled image so warrior hat
-        // lands at ~26% of card — just above the gradient start at 28%.
-        const offY  = drawH * 0.17;
+        const offX  = (drawW - W) / 2;
+        // offY = 35% of drawH → hat from ~43% of source maps to ~8% of card
+        // Image covers top ~65% of card; base fill handles the rest
+        const offY  = drawH * 0.35;
         ctx.drawImage(bgImg, -offX, -offY, drawW, drawH);
       } else {
-        const fire = ctx.createRadialGradient(W/2, H*0.30, 0, W/2, H*0.30, W);
-        fire.addColorStop(0, "rgba(255,80,0,0.65)");
-        fire.addColorStop(0.5, "rgba(160,15,0,0.30)");
+        const fire = ctx.createRadialGradient(W/2, H*0.28, 0, W/2, H*0.28, W);
+        fire.addColorStop(0, "rgba(255,80,0,0.70)");
+        fire.addColorStop(0.5, "rgba(160,15,0,0.32)");
         fire.addColorStop(1, "transparent");
         ctx.fillStyle = fire; ctx.fillRect(0, 0, W, H);
       }
 
-      // ── SUBTLE TOP VIGNETTE — darkens very top corners for depth ──
-      const topVig = ctx.createLinearGradient(0, 0, 0, H * 0.14);
-      topVig.addColorStop(0, "rgba(0,0,0,0.42)");
-      topVig.addColorStop(1, "transparent");
-      ctx.fillStyle = topVig; ctx.fillRect(0, 0, W, H * 0.14);
-
-      // ── DARK GRADIENT — slow fade starting at 26%, solid at 44% ──
-      // Warrior hat sits at ~26% (fully visible), fades gradually to near-black
-      const fadeGrd = ctx.createLinearGradient(0, H * 0.26, 0, H * 0.44);
-      fadeGrd.addColorStop(0,    "transparent");
-      fadeGrd.addColorStop(0.28, "rgba(6,8,8,0.12)");
-      fadeGrd.addColorStop(0.58, "rgba(6,8,8,0.68)");
-      fadeGrd.addColorStop(0.84, "rgba(6,8,8,0.91)");
-      fadeGrd.addColorStop(1.0,  "rgba(6,8,8,0.97)");
-      ctx.fillStyle = fadeGrd; ctx.fillRect(0, H * 0.26, W, H * 0.18);
-      ctx.fillStyle = "rgba(6,8,8,0.97)"; ctx.fillRect(0, H * 0.44, W, H * 0.56);
+      // ── FULL-CARD GRADIENT OVERLAY (matches reference Binance card) ──
+      // Warrior clear 0-34%, fast fade 34-44%, near-solid 44-55%, pure dark 55+
+      const fadeGrd = ctx.createLinearGradient(0, 0, 0, H);
+      fadeGrd.addColorStop(0,    "rgba(0,0,0,0.10)");   // top: barely dark
+      fadeGrd.addColorStop(0.34, "rgba(0,0,0,0.12)");   // warrior fully visible
+      fadeGrd.addColorStop(0.44, "rgba(0,0,0,0.78)");   // fast fade at text area
+      fadeGrd.addColorStop(0.56, "rgba(0,0,0,0.97)");   // near-solid
+      fadeGrd.addColorStop(1.0,  "rgba(0,0,0,0.99)");   // solid bottom
+      ctx.fillStyle = fadeGrd; ctx.fillRect(0, 0, W, H);
 
       const PAD = 42;
 
@@ -871,8 +863,8 @@ function generateTradeCardImage(setup, currentPrice) {
       ctx.fillStyle = "rgba(255,255,255,0.28)"; ctx.fillText("  |  ", PAD + sW, sideY);
       ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.fillText(`${lev}x`, PAD + sW + ctx.measureText("  |  ").width, sideY);
 
-      // ── PnL USDT hero (110px) — gap 72px → 52% of card ──
-      const pnlY = sideY + 72;
+      // ── PnL USDT hero (110px) — gap 114px avoids overlap with 28px side text ──
+      const pnlY = sideY + 114;
       const usdtStr = usdtPnl !== null ? `${pnlSign}${fmtC(usdtPnl, 2)}` : `${isLong ? "+" : "−"}0,00`;
       ctx.fillStyle = pnlColor; ctx.font = "bold 110px Inter, Arial"; ctx.textAlign = "left";
       ctx.fillText(usdtStr, PAD, pnlY);
