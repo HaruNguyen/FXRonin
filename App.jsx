@@ -142,6 +142,77 @@ function validateKeyFormat(k, s) {
   return null; // valid
 }
 
+// ─── FETCH RECENT CLOSED FUTURES TRADES (for Binance real card) ─────────────
+async function fetchClosedTrades(apiKey, secret) {
+  // 1. Recent realized PNL events
+  const income = await binanceFutures(
+    "/fapi/v1/income", { incomeType: "REALIZED_PNL", limit: 30 }, apiKey, secret
+  );
+  if (!income || !income.length) return [];
+
+  // 2. Group by symbol — keep the most recent event per symbol
+  const symMap = {};
+  for (const item of income) {
+    if (!symMap[item.symbol] || item.time > symMap[item.symbol].time)
+      symMap[item.symbol] = item;
+  }
+
+  // 3. Get current leverage for all open positions at once
+  let posRisk = [];
+  try { posRisk = await binanceFutures("/fapi/v2/positionRisk", {}, apiKey, secret); } catch {}
+  const levMap = {};
+  for (const p of posRisk) levMap[p.symbol] = parseInt(p.leverage) || 10;
+
+  // 4. Per symbol: reconstruct entry / exit / ROI from fills
+  const results = [];
+  for (const [symbol, inc] of Object.entries(symMap)) {
+    try {
+      const startTime = inc.time - 48 * 3600 * 1000; // 48h window
+      const fills = await binanceFutures(
+        "/fapi/v1/userTrades", { symbol, startTime, limit: 200 }, apiKey, secret
+      );
+      if (!fills.length) continue;
+
+      // Direction — hedge mode vs one-way mode
+      const ps = fills[0].positionSide;
+      const isLong = ps === "LONG" ? true : ps === "SHORT" ? false : fills[0].isBuyer;
+
+      // Opening fills: realizedPnl ≈ 0
+      const openFills  = fills.filter(f => Math.abs(parseFloat(f.realizedPnl)) < 0.0001);
+      const closeFills = fills.filter(f => Math.abs(parseFloat(f.realizedPnl)) >= 0.0001);
+      if (!openFills.length) continue;
+
+      const totalQty = openFills.reduce((s, f) => s + parseFloat(f.qty), 0);
+      const avgEntry = openFills.reduce((s, f) => s + parseFloat(f.price) * parseFloat(f.qty), 0) / totalQty;
+
+      let lastPrice = avgEntry;
+      if (closeFills.length) {
+        const cQty = closeFills.reduce((s, f) => s + parseFloat(f.qty), 0);
+        lastPrice  = closeFills.reduce((s, f) => s + parseFloat(f.price) * parseFloat(f.qty), 0) / cQty;
+      }
+
+      const totalPnl = fills.reduce((s, f) => s + parseFloat(f.realizedPnl), 0);
+      const leverage  = levMap[symbol] || 10;
+      const margin    = avgEntry * totalQty / leverage;
+      const roiPct    = margin > 0 ? (totalPnl / margin) * 100 : 0;
+
+      results.push({
+        symbol:     symbol.replace(/USDT$/, ""),
+        fullSymbol: symbol,
+        bias:       isLong ? "Long" : "Short",
+        entry:      avgEntry,
+        lastPrice,
+        leverage,
+        roiPct,
+        pnl:        totalPnl,
+        time:       inc.time,
+      });
+    } catch { /* skip symbol on error */ }
+  }
+
+  return results.sort((a, b) => b.time - a.time).slice(0, 10);
+}
+
 // ─── PRICE FETCH — WebSocket (no CORS) → REST → CoinGecko ───────────────────
 
 // Method 1: Binance WebSocket stream — bypasses CORS entirely
@@ -2679,7 +2750,7 @@ function UpdateTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // FLEX TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function FlexTab() {
+function FlexTab({ apiKey, secret }) {
   const [file, setFile] = useState(null); const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false); const [content, setContent] = useState(""); const [streaming, setStreaming] = useState(false);
   const hf = async (f) => { setFile(f); const r = new FileReader(); r.onload = e => setPreview(e.target.result); r.readAsDataURL(f); };
@@ -2710,8 +2781,125 @@ function FlexTab() {
     } catch (e) { setContent(`Error: ${e.message}`); setStreaming(false); }
     setBusy(false);
   };
+
+  // ── Binance Real Trade Card import ──
+  const [bnLoading, setBnLoading]   = useState(false);
+  const [bnTrades,  setBnTrades]    = useState([]);
+  const [bnError,   setBnError]     = useState("");
+  const [bnCardImg, setBnCardImg]   = useState(null);
+  const [bnSelected, setBnSelected] = useState(null);
+  const hasApi = !!(apiKey && secret);
+
+  const fetchBnTrades = async () => {
+    setBnLoading(true); setBnError(""); setBnTrades([]); setBnCardImg(null); setBnSelected(null);
+    try {
+      const trades = await fetchClosedTrades(apiKey, secret);
+      if (!trades.length) setBnError("Không tìm thấy lệnh đã đóng gần đây.");
+      else setBnTrades(trades);
+    } catch (e) {
+      setBnError(e.message === "CORS_BLOCKED"
+        ? "⚠️ Binance API bị chặn CORS — thử trên Binance MiniApp."
+        : `❌ Lỗi: ${e.message}`);
+    }
+    setBnLoading(false);
+  };
+
+  const genBnCard = async (t) => {
+    setBnSelected(t); setBnCardImg(null);
+    try {
+      const setup = { symbol: t.symbol, side: t.bias, entry: t.entry, leverage: t.leverage };
+      const img = await generateTradeCardImage(setup, t.lastPrice);
+      setBnCardImg(img);
+    } catch (e) { setBnError(`Card lỗi: ${e.message}`); }
+  };
+
+  const shareBnCard = async () => {
+    if (!bnCardImg) return;
+    try {
+      const blob = await (await fetch(bnCardImg)).blob();
+      const file = new File([blob], `${bnSelected?.symbol || "trade"}_card.jpg`, { type: "image/jpeg" });
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: `${bnSelected?.symbol} Trade Card — FXRonin` });
+      } else {
+        const a = document.createElement("a"); a.href = bnCardImg; a.download = file.name; a.click();
+      }
+    } catch {}
+  };
+
+  const fmtPrice = (p) => p >= 1000 ? p.toFixed(1) : p >= 1 ? p.toFixed(4) : p.toFixed(6);
+
   return (
     <div>
+      {/* ── Binance Real Trade Card ── */}
+      {hasApi && (
+        <Card style={{ marginBottom: 14, border: `1px solid ${C.gold}40` }}>
+          <Lbl c={C.gold}>📡 Trade Card Thật Từ Binance</Lbl>
+          <div style={{ fontSize: 11, color: C.mid, marginBottom: 12, lineHeight: 1.6 }}>
+            Lấy lệnh đã đóng thật → generate card với <strong style={{ color: C.gold }}>%ROI thật</strong>
+          </div>
+          <button onClick={fetchBnTrades} disabled={bnLoading}
+            style={btn(C.blue, { width: "100%", fontSize: 13, padding: "14px", opacity: bnLoading ? 0.6 : 1 })}>
+            {bnLoading ? "📡 ĐANG LẤY LỆNH..." : "📡  IMPORT TỪ BINANCE FUTURES"}
+          </button>
+          {bnError && <div style={{ color: C.bear, fontSize: 12, marginTop: 10 }}>{bnError}</div>}
+
+          {bnTrades.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 10, color: C.mid, letterSpacing: 1, marginBottom: 8, fontFamily: "'Orbitron',monospace" }}>
+                CHỌN LỆNH ĐỂ GENERATE CARD
+              </div>
+              {bnTrades.map((t, i) => {
+                const roiColor = t.roiPct >= 0 ? C.bull : C.bear;
+                const isActive = bnSelected?.symbol === t.symbol && bnSelected?.time === t.time;
+                return (
+                  <button key={i} onClick={() => genBnCard(t)} style={{
+                    width: "100%", background: isActive ? roiColor + "18" : C.card2,
+                    border: `1.5px solid ${isActive ? roiColor : C.border}`,
+                    borderRadius: 10, padding: "12px 14px", marginBottom: 8,
+                    cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    touchAction: "manipulation", WebkitTapHighlightColor: "transparent",
+                  }}>
+                    <div style={{ textAlign: "left" }}>
+                      <div style={{ color: C.gold, fontFamily: "'Orbitron',monospace", fontSize: 13, fontWeight: 700 }}>
+                        ${t.symbol}
+                        <span style={{ color: t.bias === "Long" ? C.bull : C.bear, fontSize: 10, marginLeft: 8, fontWeight: 400 }}>
+                          {t.bias.toUpperCase()} {t.leverage}x
+                        </span>
+                      </div>
+                      <div style={{ color: C.mid, fontSize: 10, marginTop: 3 }}>
+                        Entry {fmtPrice(t.entry)} → {fmtPrice(t.lastPrice)}
+                      </div>
+                    </div>
+                    <div style={{ color: roiColor, fontFamily: "'Orbitron',monospace", fontSize: 16, fontWeight: 900 }}>
+                      {t.roiPct >= 0 ? "+" : ""}{t.roiPct.toFixed(2)}%
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {bnCardImg && (
+            <div style={{ marginTop: 14 }}>
+              <img src={bnCardImg} alt="Trade Card" style={{ width: "100%", borderRadius: 12, display: "block" }} />
+              <button onClick={shareBnCard} style={btn(C.bull, { width: "100%", marginTop: 10, fontSize: 13, padding: "14px" })}>
+                📤  SHARE TRADE CARD
+              </button>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {!hasApi && (
+        <Card style={{ marginBottom: 14, border: `1px solid ${C.gold}30` }}>
+          <Lbl c={C.gold}>📡 Trade Card Thật Từ Binance</Lbl>
+          <div style={{ fontSize: 12, color: C.mid, lineHeight: 1.6 }}>
+            ⚙️ Vào tab <strong style={{ color: C.gold }}>API</strong> → nhập Binance Futures API Key để dùng tính năng này.
+          </div>
+        </Card>
+      )}
+
+      {/* ── Flex Post từ Screenshot ── */}
       <Card style={{ marginBottom: 14 }}>
         <Lbl c={C.gold}>Flex / Close Post</Lbl>
         <ImgUpload label="💰 PnL Screenshot" onFile={hf} preview={preview} hint="📎 Tap để upload ảnh kết quả lệnh" />
@@ -3412,7 +3600,7 @@ export default function App() {
       <div style={{ padding: "18px 16px 60px", maxWidth: 640, margin: "0 auto" }}>
         {tab === "setup"    && <SetupTab onUsePost={usePost} usedCount={trades.length} />}
         {tab === "update"   && <UpdateTab />}
-        {tab === "flex"     && <FlexTab />}
+        {tab === "flex"     && <FlexTab apiKey={apiKey} secret={secret} />}
         {tab === "winrate"  && <WinrateTab trades={trades} onUpdate={updTrade} onClear={clearDay} apiKey={apiKey} secret={secret} />}
         {tab === "settings" && <SettingsTab apiKey={apiKey} secret={secret} onSave={saveCredentials} />}
       </div>
