@@ -787,13 +787,15 @@ function generateTradeCardImage(setup, currentPrice) {
       // ── BASE FILL ──
       ctx.fillStyle = "#060808"; ctx.fillRect(0, 0, W, H);
 
-      // ── RONIN.png (1024×1024) — cover-fit portrait card, offY=8% → hat brim at ~10% of card ──
+      // ── RONIN.png (1024×1024 square) — cover-fit, offY=27% → hat brim at ~7% of card ──
+      // Pixel analysis: hat brim drops to dark at ~34% of drawH (470px scaled)
+      // offY = 0.27 × 1344 = 363px → hat_canvas = 470-363 = 107px ≈ 7% of card
       if (bgImg) {
         const scale = Math.max(H / bgImg.height, W / bgImg.width);
         const drawW = bgImg.width  * scale;
         const drawH = bgImg.height * scale;
         const offX  = (drawW - W) / 2;
-        const offY  = drawH * 0.08;   // hat brim at ~10%, red moon visible above
+        const offY  = drawH * 0.27;   // hat brim at ~7%, red moon + sky visible above
         ctx.drawImage(bgImg, -offX, -offY, drawW, drawH);
       } else {
         const fire = ctx.createRadialGradient(W/2, H*0.28, 0, W/2, H*0.28, W);
