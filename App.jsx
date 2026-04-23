@@ -805,13 +805,14 @@ function generateTradeCardImage(setup, currentPrice) {
         ctx.fillStyle = fire; ctx.fillRect(0, 0, W, H);
       }
 
-      // ── FULL-CARD GRADIENT OVERLAY (matches reference Binance card) ──
-      // Warrior clear 0-34%, fast fade 34-44%, near-solid 44-55%, pure dark 55+
+      // ── FULL-CARD GRADIENT OVERLAY — matches reference dark/atmospheric look ──
+      // Reference: warrior is a dark silhouette (~40% dark at body), not vivid-bright
       const fadeGrd = ctx.createLinearGradient(0, 0, 0, H);
-      fadeGrd.addColorStop(0,    "rgba(0,0,0,0.10)");   // top: barely dark
-      fadeGrd.addColorStop(0.34, "rgba(0,0,0,0.12)");   // warrior fully visible
-      fadeGrd.addColorStop(0.44, "rgba(0,0,0,0.78)");   // fast fade at text area
-      fadeGrd.addColorStop(0.56, "rgba(0,0,0,0.97)");   // near-solid
+      fadeGrd.addColorStop(0,    "rgba(0,0,0,0.20)");   // top
+      fadeGrd.addColorStop(0.22, "rgba(0,0,0,0.30)");   // warrior upper body
+      fadeGrd.addColorStop(0.38, "rgba(0,0,0,0.52)");   // warrior lower body — atmospheric
+      fadeGrd.addColorStop(0.46, "rgba(0,0,0,0.87)");   // fast fade into text area
+      fadeGrd.addColorStop(0.58, "rgba(0,0,0,0.97)");   // near-solid
       fadeGrd.addColorStop(1.0,  "rgba(0,0,0,0.99)");   // solid bottom
       ctx.fillStyle = fadeGrd; ctx.fillRect(0, 0, W, H);
 
