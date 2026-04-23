@@ -912,76 +912,74 @@ function generateTradeCardImage(setup, currentPrice) {
       // ═══════════════════════════════════════════
       const footH = H - sep2Y;           // ~244px
 
-      // ── Binance diamond logo (larger, matching reference) ──
-      const logoX = PAD, logoY = sep2Y + 24;
-      const ds    = 24;   // diamond size (was 18)
-      const drawD = (cx, cy) => {
-        ctx.save(); ctx.translate(cx, cy); ctx.rotate(Math.PI/4);
-        ctx.fillRect(-ds/2, -ds/2, ds, ds); ctx.restore();
-      };
+      // ── REAL Binance SVG logo (exact official path, scaled to ~68px) ──
+      const logoX = PAD, logoY = sep2Y + 20;
+      const logoScale = 2.83;  // 24×24 viewBox → ~68px
+      ctx.save();
+      ctx.translate(logoX, logoY);
+      ctx.scale(logoScale, logoScale);
       ctx.fillStyle = "#F0B90B";
-      const dg = ds + 4;  // 28px center spacing
-      drawD(logoX + dg,   logoY + dg);    // center
-      drawD(logoX + dg,   logoY);          // top
-      drawD(logoX + dg,   logoY + dg*2);  // bottom
-      drawD(logoX,        logoY + dg);     // left
-      drawD(logoX + dg*2, logoY + dg);    // right
-      const logoW = dg * 2 + ds;          // 80px
+      // Official Binance diamond SVG path (viewBox 0 0 24 24)
+      const bnbPath = new Path2D(
+        "M16.624 13.9202L12 18.5442L7.376 13.9202L4.952 16.3442L12 23.3922L19.048 16.3442L16.624 13.9202Z " +
+        "M12 8.35221L9.624 10.7282L12 13.1042L14.376 10.7282L12 8.35221Z " +
+        "M4.952 7.65621L7.376 10.0802L12 5.45621L16.624 10.0802L19.048 7.65621L12 0.608215L4.952 7.65621Z " +
+        "M2.528 10.0802L0.104 12.5042L2.528 14.9282L4.952 12.5042L2.528 10.0802Z " +
+        "M23.896 12.5042L21.472 10.0802L19.048 12.5042L21.472 14.9282L23.896 12.5042Z"
+      );
+      ctx.fill(bnbPath);
+      ctx.restore();
+      const logoW = Math.round(24 * logoScale); // ~68px
 
       // "BINANCE" (36px) + "FUTURES" (36px) + referral
-      const txtX = logoX + logoW + 16;
+      const txtX = logoX + logoW + 14;
       ctx.fillStyle = "#F0B90B"; ctx.font = "bold 36px Inter, Arial"; ctx.textAlign = "left";
-      ctx.fillText("BINANCE", txtX, logoY + 52);
+      ctx.fillText("BINANCE", txtX, logoY + 46);
       ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 36px Inter, Arial";
-      ctx.fillText("FUTURES", txtX, logoY + 94);
+      ctx.fillText("FUTURES", txtX, logoY + 86);
       ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "18px Inter, Arial";
-      ctx.fillText("Referral Code HARUNGUYEN", PAD, logoY + 130);
+      ctx.fillText("Referral Code HARUNGUYEN", PAD, logoY + 122);
 
-      // ── QR CODE (right, square fitting footer height - margins) ──
-      const qrPad = 12;
+      // ── REAL QR CODE via qrserver.com API ──
+      const qrPad = 10;
       const qrSz  = footH - qrPad * 2;
       const qrX   = W - PAD - qrSz;
       const qrY2  = sep2Y + qrPad;
-
-      // White background
-      ctx.fillStyle = "#FFFFFF"; ctx.fillRect(qrX, qrY2, qrSz, qrSz);
-
-      // Draw QR grid (21×21 modules, v1 QR approximation)
-      const cells  = 21;
-      const cellSz = (qrSz - 10) / cells;
-      ctx.fillStyle = "#000000";
-
-      // Finder pattern (7×7)
-      const finder = (ox, oy) => {
-        for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) {
-          const edge  = r===0||r===6||c===0||c===6;
-          const inner = r>=2&&r<=4&&c>=2&&c<=4;
-          if (edge || inner) ctx.fillRect(qrX+5+ox*cellSz+c*cellSz, qrY2+5+oy*cellSz+r*cellSz, cellSz-0.5, cellSz-0.5);
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrSz*2}x${qrSz*2}&margin=4&data=https://www.binance.com/en/futures/ref/HARUNGUYEN`;
+      // Draw QR: try loading real image, fall back to finder-pattern placeholder
+      const drawQrFallback = () => {
+        ctx.fillStyle = "#FFFFFF"; ctx.fillRect(qrX, qrY2, qrSz, qrSz);
+        const cells = 21; const csz = (qrSz - 10) / cells;
+        ctx.fillStyle = "#000000";
+        const finder = (ox, oy) => {
+          for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) {
+            if (r===0||r===6||c===0||c===6||( r>=2&&r<=4&&c>=2&&c<=4))
+              ctx.fillRect(qrX+5+(ox+c)*csz, qrY2+5+(oy+r)*csz, csz-0.5, csz-0.5);
+          }
+        };
+        finder(0,0); finder(14,0); finder(0,14);
+        let s = 0x9e3779b9;
+        const rng = () => { s=((s*1664525+1013904223)>>>0); return s/0x100000000; };
+        setup.symbol.split("").forEach(c => { for(let i=0;i<3;i++) rng(); });
+        for (let r=0;r<cells;r++) for (let c=0;c<cells;c++) {
+          if (!((r<8&&c<8)||(r<8&&c>=13)||(r>=13&&c<8)) && rng()>0.46)
+            ctx.fillRect(qrX+5+c*csz, qrY2+5+r*csz, csz-0.5, csz-0.5);
         }
       };
-      finder(0, 0);    // top-left
-      finder(14, 0);   // top-right
-      finder(0, 14);   // bottom-left
-
-      // Timing strips
-      for (let i = 8; i <= 12; i += 2) {
-        ctx.fillRect(qrX+5+i*cellSz,  qrY2+5+6*cellSz, cellSz-0.5, cellSz-0.5);
-        ctx.fillRect(qrX+5+6*cellSz,  qrY2+5+i*cellSz, cellSz-0.5, cellSz-0.5);
-      }
-
-      // Data modules (seeded pseudo-random for consistency per symbol)
-      let seed = setup.symbol.split("").reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 0x9e3779b9);
-      const rng = () => { seed = ((seed * 1664525 + 1013904223) >>> 0); return seed / 0x100000000; };
-      for (let r = 0; r < cells; r++) for (let c = 0; c < cells; c++) {
-        const skipFinder = (r<8&&c<8)||(r<8&&c>=13)||(r>=13&&c<8);
-        const skipTiming = (r===6&&c>=8&&c<=12)||(c===6&&r>=8&&r<=12);
-        if (!skipFinder && !skipTiming && rng() > 0.48) {
-          ctx.fillRect(qrX+5+c*cellSz, qrY2+5+r*cellSz, cellSz-0.5, cellSz-0.5);
-        }
-      }
-
-      ctx.textAlign = "left";
-      canvas.toBlob(blob => resolve(URL.createObjectURL(blob)), "image/jpeg", 0.97);
+      const qrImg = new Image();
+      qrImg.crossOrigin = "anonymous";
+      qrImg.onload = () => {
+        ctx.fillStyle = "#FFFFFF"; ctx.fillRect(qrX-2, qrY2-2, qrSz+4, qrSz+4);
+        ctx.drawImage(qrImg, qrX, qrY2, qrSz, qrSz);
+        ctx.textAlign = "left";
+        canvas.toBlob(blob => resolve(URL.createObjectURL(blob)), "image/jpeg", 0.97);
+      };
+      qrImg.onerror = () => {
+        drawQrFallback();
+        ctx.textAlign = "left";
+        canvas.toBlob(blob => resolve(URL.createObjectURL(blob)), "image/jpeg", 0.97);
+      };
+      qrImg.src = qrUrl;
     };
 
     // Load embedded RONIN background
