@@ -787,12 +787,12 @@ function generateTradeCardImage(setup, currentPrice) {
       // ── BASE FILL ──
       ctx.fillStyle = "#060808"; ctx.fillRect(0, 0, W, H);
 
-      // ── RONIN PHOTO (top 57% of card = 765px) ──
-      const photoH = Math.round(H * 0.57);
+      // ── RONIN PHOTO (top 60% of card) ──
+      const photoH = Math.round(H * 0.60);
       if (bgImg) {
         const scale  = W / bgImg.width;
         const drawH  = bgImg.height * scale;
-        const offY   = Math.max(0, (drawH - photoH) * 0.28);
+        const offY   = Math.max(0, (drawH - photoH) * 0.20);
         ctx.drawImage(bgImg, 0, -offY, W, drawH);
       } else {
         const fire = ctx.createRadialGradient(W/2, H*0.25, 0, W/2, H*0.25, W*0.8);
@@ -802,8 +802,8 @@ function generateTradeCardImage(setup, currentPrice) {
         ctx.fillStyle = fire; ctx.fillRect(0, 0, W, photoH);
       }
 
-      // Fade photo → dark (bottom 35% of photo)
-      const fadeTop = photoH * 0.60;
+      // Fade photo → dark (bottom 30% of photo)
+      const fadeTop = photoH * 0.68;
       const fadeGrd = ctx.createLinearGradient(0, fadeTop, 0, photoH);
       fadeGrd.addColorStop(0, "transparent");
       fadeGrd.addColorStop(1, "rgba(6,8,8,1)");
@@ -817,32 +817,32 @@ function generateTradeCardImage(setup, currentPrice) {
       // ═══════════════════════════════════════════
       // HEADER: Avatar circle + FXRonin + timestamp
       // ═══════════════════════════════════════════
-      const avR = 30, avCX = PAD + avR, avCY = 48;
+      const avR = 48, avCX = PAD + avR, avCY = 64;
       ctx.save();
       ctx.beginPath(); ctx.arc(avCX, avCY, avR, 0, Math.PI * 2); ctx.clip();
       if (bgImg) {
-        // Crop center-top of RONIN for the avatar (where the warrior hat is)
-        const sX = bgImg.width  * 0.28, sY = bgImg.height * 0.02;
-        const sW = bgImg.width  * 0.44, sH = bgImg.height * 0.44;
+        // Crop center of RONIN — warrior + hat + sun behind
+        const sX = bgImg.width  * 0.25, sY = bgImg.height * 0.05;
+        const sW = bgImg.width  * 0.50, sH = bgImg.height * 0.50;
         ctx.drawImage(bgImg, sX, sY, sW, sH, avCX - avR, avCY - avR, avR*2, avR*2);
       } else {
         ctx.fillStyle = "#8B0000"; ctx.fillRect(avCX-avR, avCY-avR, avR*2, avR*2);
       }
       ctx.restore();
-      ctx.strokeStyle = "rgba(255,255,255,0.28)"; ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(avCX, avCY, avR, 0, Math.PI*2); ctx.stroke();
 
-      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 22px Inter, Arial"; ctx.textAlign = "left";
-      ctx.fillText("FXRonin", avCX + avR + 14, avCY - 4);
+      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 24px Inter, Arial"; ctx.textAlign = "left";
+      ctx.fillText("FXRonin", avCX + avR + 16, avCY - 6);
       const vnNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
       const ts = `${vnNow.getFullYear()}-${String(vnNow.getMonth()+1).padStart(2,"0")}-${String(vnNow.getDate()).padStart(2,"0")} ${String(vnNow.getHours()).padStart(2,"0")}:${String(vnNow.getMinutes()).padStart(2,"0")}:${String(vnNow.getSeconds()).padStart(2,"0")}`;
-      ctx.fillStyle = "rgba(255,255,255,0.52)"; ctx.font = "15px Inter, Arial";
-      ctx.fillText(ts, avCX + avR + 14, avCY + 18);
+      ctx.fillStyle = "rgba(255,255,255,0.60)"; ctx.font = "17px Inter, Arial";
+      ctx.fillText(ts, avCX + avR + 16, avCY + 20);
 
       // ═══════════════════════════════════════════
       // CONTENT SECTION (below photo)
       // ═══════════════════════════════════════════
-      const cY0    = photoH + 52;   // ~817px — content starts
+      const cY0    = photoH + 38;   // content starts just below photo
 
       // Token name
       ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 46px Inter, Arial"; ctx.textAlign = "left";
@@ -857,14 +857,22 @@ function generateTradeCardImage(setup, currentPrice) {
       ctx.fillStyle = "rgba(255,255,255,0.28)"; ctx.fillText("  |  ", PAD + sW, sideY);
       ctx.fillStyle = "rgba(255,255,255,0.65)"; ctx.fillText(`${lev}x`, PAD + sW + ctx.measureText("  |  ").width, sideY);
 
-      // ── PnL % HERO (Binance reference style — % is the dominant number) ──
-      const pnlY   = sideY + 106;
-      const pctStr = pnlPct !== null ? `${pnlSign}${fmtC(pnlPct, 2)}%` : `${isLong ? "+" : "−"}0,00%`;
-      ctx.fillStyle = pnlColor; ctx.font = "bold 96px Inter, Arial"; ctx.textAlign = "left";
-      ctx.fillText(pctStr, PAD, pnlY);
+      // ── PnL USDT (large headline) ──
+      const pnlY    = sideY + 108;
+      const usdtStr = usdtPnl !== null ? `${pnlSign}${fmtC(usdtPnl, 2)}` : `${isLong ? "+" : "−"}0,00`;
+      ctx.fillStyle = pnlColor; ctx.font = "bold 88px Inter, Arial"; ctx.textAlign = "left";
+      ctx.fillText(usdtStr, PAD, pnlY);
+      const pnlTW = ctx.measureText(usdtStr).width;
+      ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "bold 28px Inter, Arial";
+      ctx.fillText(" USDT", PAD + pnlTW, pnlY - 18);
+
+      // ── PnL % ──
+      const pctStr = pnlPct !== null ? `${pnlSign}${fmtC(pnlPct, 2)}%` : "Pending sync";
+      ctx.fillStyle = pnlColor; ctx.font = "bold 44px Inter, Arial"; ctx.textAlign = "left";
+      ctx.fillText(pctStr, PAD, pnlY + 58);
 
       // ── THIN SEPARATOR 1 ──
-      const sep1Y = pnlY + 76;
+      const sep1Y = pnlY + 96;
       ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(PAD, sep1Y); ctx.lineTo(W - PAD, sep1Y); ctx.stroke();
 
