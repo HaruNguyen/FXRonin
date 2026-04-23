@@ -794,7 +794,8 @@ function generateTradeCardImage(setup, currentPrice) {
         const drawW = bgImg.width  * scale;
         const drawH = bgImg.height * scale;
         const offX  = (drawW - W) / 2;                       // center crop horizontally
-        const offY  = Math.max(0, drawH * 0.55 - H * 0.40); // warrior at ~40% card height
+        // Hat tip at 14% of source → show at 8% of card → offY ≈ 80px
+        const offY  = Math.max(0, drawH * 0.14 - H * 0.08); // warrior hat at ~8% card top
         ctx.drawImage(bgImg, -offX, -offY, drawW, drawH);
         // Global atmospheric darkening — match reference moody look
         ctx.fillStyle = "rgba(0,0,0,0.38)"; ctx.fillRect(0, 0, W, H);
