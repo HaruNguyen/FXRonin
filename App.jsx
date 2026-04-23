@@ -796,6 +796,8 @@ function generateTradeCardImage(setup, currentPrice) {
         const offX  = (drawW - W) / 2;                       // center crop horizontally
         const offY  = Math.max(0, drawH * 0.55 - H * 0.40); // warrior at ~40% card height
         ctx.drawImage(bgImg, -offX, -offY, drawW, drawH);
+        // Global atmospheric darkening — match reference moody look
+        ctx.fillStyle = "rgba(0,0,0,0.38)"; ctx.fillRect(0, 0, W, H);
       } else {
         const fire = ctx.createRadialGradient(W/2, H*0.28, 0, W/2, H*0.28, W);
         fire.addColorStop(0, "rgba(255,80,0,0.60)");
@@ -804,22 +806,21 @@ function generateTradeCardImage(setup, currentPrice) {
         ctx.fillStyle = fire; ctx.fillRect(0, 0, W, H);
       }
 
-      // ── DARK GRADIENT OVERLAY — fade starts at 26%, solid dark from 46% ──
-      const fadeGrd = ctx.createLinearGradient(0, H * 0.26, 0, H * 0.46);
-      fadeGrd.addColorStop(0,    "transparent");
-      fadeGrd.addColorStop(0.40, "rgba(6,8,8,0.72)");
-      fadeGrd.addColorStop(1,    "rgba(6,8,8,0.97)");
-      ctx.fillStyle = fadeGrd; ctx.fillRect(0, H * 0.26, W, H * 0.20);
-      ctx.fillStyle = "rgba(6,8,8,0.97)"; ctx.fillRect(0, H * 0.46, W, H * 0.54);
-      // Solid dark cap for footer
-      ctx.fillStyle = "rgba(6,8,8,0.97)"; ctx.fillRect(0, H * 0.72, W, H * 0.28);
+      // ── DARK GRADIENT OVERLAY — from top, solid below 44% ──
+      const fadeGrd = ctx.createLinearGradient(0, 0, 0, H * 0.44);
+      fadeGrd.addColorStop(0,    "rgba(0,0,0,0.10)");   // slight top vignette
+      fadeGrd.addColorStop(0.50, "rgba(6,8,8,0.50)");
+      fadeGrd.addColorStop(0.85, "rgba(6,8,8,0.96)");
+      fadeGrd.addColorStop(1,    "rgba(6,8,8,0.98)");
+      ctx.fillStyle = fadeGrd; ctx.fillRect(0, 0, W, H * 0.44);
+      ctx.fillStyle = "rgba(6,8,8,0.98)"; ctx.fillRect(0, H * 0.44, W, H * 0.56);
 
       const PAD = 42;
 
       // ═══════════════════════════════════════════
       // HEADER: Avatar circle + FXRonin + timestamp
       // ═══════════════════════════════════════════
-      const avR = 58, avCX = PAD + avR, avCY = 76;
+      const avR = 88, avCX = PAD + avR, avCY = 106;
       ctx.save();
       ctx.beginPath(); ctx.arc(avCX, avCY, avR, 0, Math.PI * 2); ctx.clip();
       if (bgImg) {
@@ -834,12 +835,12 @@ function generateTradeCardImage(setup, currentPrice) {
       ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(avCX, avCY, avR, 0, Math.PI*2); ctx.stroke();
 
-      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 26px Inter, Arial"; ctx.textAlign = "left";
-      ctx.fillText("FXRonin", avCX + avR + 18, avCY - 8);
+      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 30px Inter, Arial"; ctx.textAlign = "left";
+      ctx.fillText("FXRonin", avCX + avR + 20, avCY - 12);
       const vnNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
       const ts = `${vnNow.getFullYear()}-${String(vnNow.getMonth()+1).padStart(2,"0")}-${String(vnNow.getDate()).padStart(2,"0")} ${String(vnNow.getHours()).padStart(2,"0")}:${String(vnNow.getMinutes()).padStart(2,"0")}:${String(vnNow.getSeconds()).padStart(2,"0")}`;
-      ctx.fillStyle = "rgba(255,255,255,0.65)"; ctx.font = "18px Inter, Arial";
-      ctx.fillText(ts, avCX + avR + 18, avCY + 22);
+      ctx.fillStyle = "rgba(255,255,255,0.70)"; ctx.font = "20px Inter, Arial";
+      ctx.fillText(ts, avCX + avR + 20, avCY + 24);
 
       // ═══════════════════════════════════════════
       // CONTENT SECTION (below photo)
