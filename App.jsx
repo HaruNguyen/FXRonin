@@ -797,8 +797,6 @@ function generateTradeCardImage(setup, currentPrice) {
         // Hat tip at 14% of source → show at 8% of card → offY ≈ 80px
         const offY  = Math.max(0, drawH * 0.14 - H * 0.08); // warrior hat at ~8% card top
         ctx.drawImage(bgImg, -offX, -offY, drawW, drawH);
-        // Global atmospheric darkening — match reference moody look
-        ctx.fillStyle = "rgba(0,0,0,0.38)"; ctx.fillRect(0, 0, W, H);
       } else {
         const fire = ctx.createRadialGradient(W/2, H*0.28, 0, W/2, H*0.28, W);
         fire.addColorStop(0, "rgba(255,80,0,0.60)");
@@ -807,14 +805,13 @@ function generateTradeCardImage(setup, currentPrice) {
         ctx.fillStyle = fire; ctx.fillRect(0, 0, W, H);
       }
 
-      // ── DARK GRADIENT OVERLAY — from top, solid below 44% ──
-      const fadeGrd = ctx.createLinearGradient(0, 0, 0, H * 0.44);
-      fadeGrd.addColorStop(0,    "rgba(0,0,0,0.10)");   // slight top vignette
-      fadeGrd.addColorStop(0.50, "rgba(6,8,8,0.50)");
-      fadeGrd.addColorStop(0.85, "rgba(6,8,8,0.96)");
+      // ── DARK GRADIENT — transparent top, solid from 46% (for text readability) ──
+      const fadeGrd = ctx.createLinearGradient(0, H * 0.28, 0, H * 0.46);
+      fadeGrd.addColorStop(0,    "transparent");
+      fadeGrd.addColorStop(0.60, "rgba(6,8,8,0.90)");
       fadeGrd.addColorStop(1,    "rgba(6,8,8,0.98)");
-      ctx.fillStyle = fadeGrd; ctx.fillRect(0, 0, W, H * 0.44);
-      ctx.fillStyle = "rgba(6,8,8,0.98)"; ctx.fillRect(0, H * 0.44, W, H * 0.56);
+      ctx.fillStyle = fadeGrd; ctx.fillRect(0, H * 0.28, W, H * 0.18);
+      ctx.fillStyle = "rgba(6,8,8,0.98)"; ctx.fillRect(0, H * 0.46, W, H * 0.54);
 
       const PAD = 42;
 
