@@ -805,15 +805,17 @@ function generateTradeCardImage(setup, currentPrice) {
         ctx.fillStyle = fire; ctx.fillRect(0, 0, W, H);
       }
 
-      // ── FULL-CARD GRADIENT OVERLAY — matches reference atmospheric silhouette ──
-      // RONIN.png (square, 1024×1024): moon shows at top, warrior is dark silhouette
+      // ── FULL-CARD GRADIENT OVERLAY — atmospheric dark silhouette (reference-matched) ──
+      // hat_tip=6%, hat_brim=15%, warrior_body=15-45%
+      // Reference: warrior is dim silhouette against orange glow, body mostly in shadow
       const fadeGrd = ctx.createLinearGradient(0, 0, 0, H);
-      fadeGrd.addColorStop(0,    "rgba(0,0,0,0.22)");   // top — slight dark, moon glow visible
-      fadeGrd.addColorStop(0.10, "rgba(0,0,0,0.28)");   // hat tip
-      fadeGrd.addColorStop(0.22, "rgba(0,0,0,0.38)");   // hat brim / warrior shoulder
-      fadeGrd.addColorStop(0.35, "rgba(0,0,0,0.58)");   // warrior chest — darkening
-      fadeGrd.addColorStop(0.44, "rgba(0,0,0,0.82)");   // warrior waist — fast fade
-      fadeGrd.addColorStop(0.52, "rgba(0,0,0,0.96)");   // text area — near solid
+      fadeGrd.addColorStop(0,    "rgba(0,0,0,0.18)");   // top sky — orange glow visible
+      fadeGrd.addColorStop(0.08, "rgba(0,0,0,0.24)");   // hat tip area
+      fadeGrd.addColorStop(0.18, "rgba(0,0,0,0.45)");   // hat brim — warrior begins
+      fadeGrd.addColorStop(0.28, "rgba(0,0,0,0.62)");   // upper body — darkening quickly
+      fadeGrd.addColorStop(0.38, "rgba(0,0,0,0.78)");   // mid body — near dark
+      fadeGrd.addColorStop(0.46, "rgba(0,0,0,0.92)");   // lower body → text transition
+      fadeGrd.addColorStop(0.54, "rgba(0,0,0,0.98)");   // text area solid
       fadeGrd.addColorStop(1.0,  "rgba(0,0,0,0.99)");   // solid bottom
       ctx.fillStyle = fadeGrd; ctx.fillRect(0, 0, W, H);
 
