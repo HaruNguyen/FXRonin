@@ -787,15 +787,15 @@ function generateTradeCardImage(setup, currentPrice) {
       // ── BASE FILL ──
       ctx.fillStyle = "#060808"; ctx.fillRect(0, 0, W, H);
 
-      // ── RONIN PHOTO — cover-fit, large offY so warrior hat lands at ~8% of card ──
+      // ── RONIN PHOTO — cover-fit + zoom-in (1.35×) so warrior fills card like Binance style ──
       if (bgImg) {
-        const scale = Math.max(H / bgImg.height, W / bgImg.width);
+        const baseScale = Math.max(H / bgImg.height, W / bgImg.width);
+        const scale = baseScale * 1.35;   // zoom in 35% → warrior is larger, more prominent
         const drawW = bgImg.width  * scale;
         const drawH = bgImg.height * scale;
         const offX  = (drawW - W) / 2;
-        // offY = 35% of drawH → hat from ~43% of source maps to ~8% of card
-        // Image covers top ~65% of card; base fill handles the rest
-        const offY  = drawH * 0.35;
+        // offY keeps warrior hat near top ~10% of card
+        const offY  = drawH * 0.38;
         ctx.drawImage(bgImg, -offX, -offY, drawW, drawH);
       } else {
         const fire = ctx.createRadialGradient(W/2, H*0.28, 0, W/2, H*0.28, W);
