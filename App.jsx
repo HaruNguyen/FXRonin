@@ -761,7 +761,7 @@ function generateTradeCardImage(setup, currentPrice) {
     }
     const pnlColor = pnlPct === null ? (isLong ? "#0ECB81" : "#F6465D")
                    : pnlPct >= 0     ? "#0ECB81" : "#F6465D";
-    const pnlSign = (pnlPct !== null && pnlPct < 0) ? "" : "+";
+    const pnlSign = (pnlPct !== null && pnlPct < 0) ? "−" : "+";
 
     // Position size → USDT PnL
     const posVal  = lev <= 10 ? 5000 : lev <= 25 ? 7500 : 10000;
@@ -771,8 +771,11 @@ function generateTradeCardImage(setup, currentPrice) {
     // ── Comma-style formatter (Binance: 0,15 / 149,28%) ──
     const fmtC = (n, dp) => {
       if (n === null || n === undefined) return "—";
-      const d = dp !== undefined ? dp : (Math.abs(n) >= 1000 ? 1 : Math.abs(n) >= 100 ? 2 : 2);
-      return Math.abs(n).toFixed(d).replace(".", ",");
+      const d = dp !== undefined ? dp : 2;
+      const fixed = Math.abs(n).toFixed(d);
+      const [intPart, decPart] = fixed.split(".");
+      const intFormatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      return decPart !== undefined ? `${intFormatted},${decPart}` : intFormatted;
     };
     const fmtPrice = (p) => {
       if (!p || p === 0) return "—";
@@ -854,22 +857,14 @@ function generateTradeCardImage(setup, currentPrice) {
       ctx.fillStyle = "rgba(255,255,255,0.28)"; ctx.fillText("  |  ", PAD + sW, sideY);
       ctx.fillStyle = "rgba(255,255,255,0.65)"; ctx.fillText(`${lev}x`, PAD + sW + ctx.measureText("  |  ").width, sideY);
 
-      // ── PnL USDT (large headline) ──
-      const pnlY    = sideY + 108;
-      const usdtStr = usdtPnl !== null ? `${pnlSign}${fmtC(usdtPnl, 2)}` : `${isLong ? "+" : "−"}0,00`;
-      ctx.fillStyle = pnlColor; ctx.font = "bold 88px Inter, Arial"; ctx.textAlign = "left";
-      ctx.fillText(usdtStr, PAD, pnlY);
-      const pnlTW = ctx.measureText(usdtStr).width;
-      ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "bold 28px Inter, Arial";
-      ctx.fillText(" USDT", PAD + pnlTW, pnlY - 18);
-
-      // ── PnL % ──
-      const pctStr = pnlPct !== null ? `${pnlSign}${fmtC(pnlPct, 2)}%` : "Pending sync";
-      ctx.fillStyle = pnlColor; ctx.font = "bold 44px Inter, Arial"; ctx.textAlign = "left";
-      ctx.fillText(pctStr, PAD, pnlY + 58);
+      // ── PnL % HERO (Binance reference style — % is the dominant number) ──
+      const pnlY   = sideY + 106;
+      const pctStr = pnlPct !== null ? `${pnlSign}${fmtC(pnlPct, 2)}%` : `${isLong ? "+" : "−"}0,00%`;
+      ctx.fillStyle = pnlColor; ctx.font = "bold 96px Inter, Arial"; ctx.textAlign = "left";
+      ctx.fillText(pctStr, PAD, pnlY);
 
       // ── THIN SEPARATOR 1 ──
-      const sep1Y = pnlY + 96;
+      const sep1Y = pnlY + 76;
       ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(PAD, sep1Y); ctx.lineTo(W - PAD, sep1Y); ctx.stroke();
 
