@@ -795,7 +795,7 @@ function generateTradeCardImage(setup, currentPrice) {
         const drawW = bgImg.width  * scale;
         const drawH = bgImg.height * scale;
         const offX  = (drawW - W) / 2;
-        const offY  = drawH * 0.27;   // hat brim at ~7%, red moon + sky visible above
+        const offY  = drawH * 0.33;   // hat tip at card top edge, hat brim at 9% — matches reference
         ctx.drawImage(bgImg, -offX, -offY, drawW, drawH);
       } else {
         const fire = ctx.createRadialGradient(W/2, H*0.28, 0, W/2, H*0.28, W);
