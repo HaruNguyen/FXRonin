@@ -853,88 +853,89 @@ function generateTradeCardImage(setup, currentPrice) {
       // ═══════════════════════════════════════════
       // CONTENT SECTION (below photo)
       // ═══════════════════════════════════════════
-      // ── CONTENT SECTION — positions measured from reference card ──
-      const cY0 = Math.round(H * 0.41);   // 551px — token name (41%)
+      // ── CONTENT SECTION — pixel-matched to reference card ──
+      // Reference measurements (% of 1344px card):
+      //   token=42%, side=47%, usdt=52%, %=63.5%, sep1=67%, labs=70%, vals=75%, sep2=82%
+      const cY0 = Math.round(H * 0.42);   // 564px — token name
 
-      // Token name (68px)
+      // Token name (68px bold)
       ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 68px Inter, Arial"; ctx.textAlign = "left";
       ctx.fillText(`$${setup.symbol} Perpetual`, PAD, cY0);
 
-      // Side + Leverage (sideY = 41% + ~6% = 47%)
-      const sideY = cY0 + 82;             // ~633
+      // Side + Leverage  (gap 66px → 47% of card)
+      const sideY = cY0 + 66;
       const sideColor = isLong ? "#0ECB81" : "#F6465D";
       ctx.font = "bold 28px Inter, Arial";
       ctx.fillStyle = sideColor; ctx.fillText(isLong ? "Long" : "Short", PAD, sideY);
       const sW = ctx.measureText(isLong ? "Long" : "Short").width;
-      ctx.fillStyle = "rgba(255,255,255,0.30)"; ctx.fillText("  |  ", PAD + sW, sideY);
-      ctx.fillStyle = "rgba(255,255,255,0.70)"; ctx.fillText(`${lev}x`, PAD + sW + ctx.measureText("  |  ").width, sideY);
+      ctx.fillStyle = "rgba(255,255,255,0.28)"; ctx.fillText("  |  ", PAD + sW, sideY);
+      ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.fillText(`${lev}x`, PAD + sW + ctx.measureText("  |  ").width, sideY);
 
-      // ── PnL USDT hero (110px) — pnlY = 56% ──
-      const pnlY   = sideY + 130;         // ~763
+      // ── PnL USDT hero (110px) — gap 72px → 52% of card ──
+      const pnlY = sideY + 72;
       const usdtStr = usdtPnl !== null ? `${pnlSign}${fmtC(usdtPnl, 2)}` : `${isLong ? "+" : "−"}0,00`;
       ctx.fillStyle = pnlColor; ctx.font = "bold 110px Inter, Arial"; ctx.textAlign = "left";
       ctx.fillText(usdtStr, PAD, pnlY);
       const pnlTW = ctx.measureText(usdtStr).width;
-      ctx.fillStyle = "rgba(255,255,255,0.65)"; ctx.font = "bold 38px Inter, Arial";
-      ctx.fillText(" USDT", PAD + pnlTW, pnlY - 22);
+      ctx.fillStyle = "rgba(255,255,255,0.70)"; ctx.font = "bold 38px Inter, Arial";
+      ctx.fillText(" USDT", PAD + pnlTW, pnlY - 20);
 
-      // ── PnL % (58px) — pctY = 68% ──
-      const pctY  = pnlY + 152;           // ~915
+      // ── PnL % (58px) — gap 152px → 63.5% of card ──
+      const pctY = pnlY + 152;
       const pctStr = pnlPct !== null ? `${pnlSign}${fmtC(pnlPct, 2)}%` : `${isLong ? "+" : "−"}0,00%`;
       ctx.fillStyle = pnlColor; ctx.font = "bold 58px Inter, Arial"; ctx.textAlign = "left";
       ctx.fillText(pctStr, PAD, pctY);
 
-      // ── SEPARATOR 1 (after %) ──
-      const sep1Y = pctY + 44;            // ~959
+      // ── SEPARATOR 1 ──
+      const sep1Y = pctY + 42;
       ctx.strokeStyle = "rgba(255,255,255,0.16)"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(PAD, sep1Y); ctx.lineTo(W - PAD, sep1Y); ctx.stroke();
 
-      // ── ENTRY / LAST PRICE — priceLabY = 75% ──
-      const priceLabY = sep1Y + 48;       // ~1007
-      const priceValY = priceLabY + 88;   // ~1095
+      // ── ENTRY / LAST PRICE ──
+      const priceLabY = sep1Y + 44;
+      const priceValY = priceLabY + 72;
       const col2X     = Math.round(W * 0.50);
-      ctx.fillStyle = "rgba(255,255,255,0.52)"; ctx.font = "26px Inter, Arial"; ctx.textAlign = "left";
+      ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "26px Inter, Arial"; ctx.textAlign = "left";
       ctx.fillText("Entry Price", PAD,   priceLabY);
       ctx.fillText("Last Price",  col2X, priceLabY);
       ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 50px Inter, Arial";
-      ctx.fillText(fmtPrice(setup.entry),        PAD,   priceValY);
-      ctx.fillText(fmtPrice(currentPrice || 0),   col2X, priceValY);
+      ctx.fillText(fmtPrice(setup.entry),       PAD,   priceValY);
+      ctx.fillText(fmtPrice(currentPrice || 0), col2X, priceValY);
 
-      // ── FULL-WIDTH SEPARATOR 2 (sep2Y = 86%) ──
-      const sep2Y = priceValY + 62;       // ~1157
+      // ── FULL-WIDTH SEPARATOR 2 (82% of card) ──
+      const sep2Y = priceValY + 88;
       ctx.strokeStyle = "rgba(255,255,255,0.30)"; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(0, sep2Y); ctx.lineTo(W, sep2Y); ctx.stroke();
 
       // ═══════════════════════════════════════════
-      // BINANCE FOOTER  (sep2Y → H)
+      // BINANCE FOOTER  (sep2Y → H)  ~244px tall
       // ═══════════════════════════════════════════
-      const footH  = H - sep2Y;           // ~142px
-      const footMY = sep2Y + footH * 0.5; // vertical mid of footer
+      const footH = H - sep2Y;           // ~244px
 
-      // ── Binance diamond logo ──
-      const logoX = PAD, logoY = sep2Y + 20;
-      const ds    = 18;   // diamond size
+      // ── Binance diamond logo (larger, matching reference) ──
+      const logoX = PAD, logoY = sep2Y + 24;
+      const ds    = 24;   // diamond size (was 18)
       const drawD = (cx, cy) => {
         ctx.save(); ctx.translate(cx, cy); ctx.rotate(Math.PI/4);
         ctx.fillRect(-ds/2, -ds/2, ds, ds); ctx.restore();
       };
       ctx.fillStyle = "#F0B90B";
-      const dg = ds + 4;  // diamond center spacing
-      drawD(logoX + dg,    logoY + dg);   // center
-      drawD(logoX + dg,    logoY);         // top
-      drawD(logoX + dg,    logoY + dg*2); // bottom
-      drawD(logoX,         logoY + dg);   // left
-      drawD(logoX + dg*2,  logoY + dg);   // right
-      const logoW = dg * 2 + ds;
+      const dg = ds + 4;  // 28px center spacing
+      drawD(logoX + dg,   logoY + dg);    // center
+      drawD(logoX + dg,   logoY);          // top
+      drawD(logoX + dg,   logoY + dg*2);  // bottom
+      drawD(logoX,        logoY + dg);     // left
+      drawD(logoX + dg*2, logoY + dg);    // right
+      const logoW = dg * 2 + ds;          // 80px
 
-      // "BINANCE" + "FUTURES" + referral
-      const txtX = logoX + logoW + 14;
-      ctx.fillStyle = "#F0B90B"; ctx.font = "bold 30px Inter, Arial"; ctx.textAlign = "left";
-      ctx.fillText("BINANCE", txtX, logoY + 46);
-      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 30px Inter, Arial";
-      ctx.fillText("FUTURES", txtX, logoY + 82);
-      ctx.fillStyle = "rgba(255,255,255,0.60)"; ctx.font = "17px Inter, Arial";
-      ctx.fillText("Referral Code HARUNGUYEN", PAD, logoY + 114);
+      // "BINANCE" (36px) + "FUTURES" (36px) + referral
+      const txtX = logoX + logoW + 16;
+      ctx.fillStyle = "#F0B90B"; ctx.font = "bold 36px Inter, Arial"; ctx.textAlign = "left";
+      ctx.fillText("BINANCE", txtX, logoY + 52);
+      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 36px Inter, Arial";
+      ctx.fillText("FUTURES", txtX, logoY + 94);
+      ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "18px Inter, Arial";
+      ctx.fillText("Referral Code HARUNGUYEN", PAD, logoY + 130);
 
       // ── QR CODE (right, square fitting footer height - margins) ──
       const qrPad = 12;
