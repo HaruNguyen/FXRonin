@@ -787,15 +787,15 @@ function generateTradeCardImage(setup, currentPrice) {
       // ── BASE FILL ──
       ctx.fillStyle = "#060808"; ctx.fillRect(0, 0, W, H);
 
-      // ── RONIN.png (1024×1024 square) — cover-fit, offY=27% → hat brim at ~7% of card ──
-      // Pixel analysis: hat brim drops to dark at ~34% of drawH (470px scaled)
-      // offY = 0.27 × 1344 = 363px → hat_canvas = 470-363 = 107px ≈ 7% of card
+      // ── RONIN.png (1024×1024) — zoom OUT 0.85× cover-fit → warrior=46% card width, matches reference ──
+      // Grid analysis: hat_tip=33%dh, hat_brim=42%dh
+      // zoom=0.85: scale=1.116, drawH=1142px → offY=0.33×1142=376px → hat_brim at 8% card
       if (bgImg) {
-        const scale = Math.max(H / bgImg.height, W / bgImg.width);
+        const scale = Math.max(H / bgImg.height, W / bgImg.width) * 0.85;
         const drawW = bgImg.width  * scale;
         const drawH = bgImg.height * scale;
         const offX  = (drawW - W) / 2;
-        const offY  = drawH * 0.33;   // hat tip at card top edge, hat brim at 9% — matches reference
+        const offY  = drawH * 0.33;   // hat tip at top edge, hat brim 8%, castle ruins visible both sides
         ctx.drawImage(bgImg, -offX, -offY, drawW, drawH);
       } else {
         const fire = ctx.createRadialGradient(W/2, H*0.28, 0, W/2, H*0.28, W);
