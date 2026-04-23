@@ -787,15 +787,13 @@ function generateTradeCardImage(setup, currentPrice) {
       // ── BASE FILL ──
       ctx.fillStyle = "#060808"; ctx.fillRect(0, 0, W, H);
 
-      // ── RONIN PHOTO — cover-fit + zoom-in (1.35×) so warrior fills card like Binance style ──
+      // ── RONIN PHOTO — cover-fit, offY=38% keeps hat at ~5% of card (matches reference) ──
       if (bgImg) {
-        const baseScale = Math.max(H / bgImg.height, W / bgImg.width);
-        const scale = baseScale * 1.35;   // zoom in 35% → warrior is larger, more prominent
+        const scale = Math.max(H / bgImg.height, W / bgImg.width);
         const drawW = bgImg.width  * scale;
         const drawH = bgImg.height * scale;
         const offX  = (drawW - W) / 2;
-        // offY keeps warrior hat near top ~10% of card
-        const offY  = drawH * 0.38;
+        const offY  = drawH * 0.38;   // hat at ~5% of card, warrior spans ~5-57%
         ctx.drawImage(bgImg, -offX, -offY, drawW, drawH);
       } else {
         const fire = ctx.createRadialGradient(W/2, H*0.28, 0, W/2, H*0.28, W);
@@ -805,14 +803,15 @@ function generateTradeCardImage(setup, currentPrice) {
         ctx.fillStyle = fire; ctx.fillRect(0, 0, W, H);
       }
 
-      // ── FULL-CARD GRADIENT OVERLAY — matches reference dark/atmospheric look ──
-      // Reference: warrior is a dark silhouette (~40% dark at body), not vivid-bright
+      // ── FULL-CARD GRADIENT OVERLAY — atmospheric silhouette matching reference ──
+      // Reference: top is lightly darkened, warrior body gradually darkens, below 45% = near-solid
       const fadeGrd = ctx.createLinearGradient(0, 0, 0, H);
-      fadeGrd.addColorStop(0,    "rgba(0,0,0,0.20)");   // top
-      fadeGrd.addColorStop(0.22, "rgba(0,0,0,0.30)");   // warrior upper body
-      fadeGrd.addColorStop(0.38, "rgba(0,0,0,0.52)");   // warrior lower body — atmospheric
-      fadeGrd.addColorStop(0.46, "rgba(0,0,0,0.87)");   // fast fade into text area
-      fadeGrd.addColorStop(0.58, "rgba(0,0,0,0.97)");   // near-solid
+      fadeGrd.addColorStop(0,    "rgba(0,0,0,0.15)");   // very top — let sky show
+      fadeGrd.addColorStop(0.12, "rgba(0,0,0,0.20)");   // hat area — slight dark
+      fadeGrd.addColorStop(0.30, "rgba(0,0,0,0.35)");   // warrior chest — atmospheric
+      fadeGrd.addColorStop(0.40, "rgba(0,0,0,0.65)");   // warrior waist — fading fast
+      fadeGrd.addColorStop(0.48, "rgba(0,0,0,0.92)");   // just above text — near solid
+      fadeGrd.addColorStop(0.56, "rgba(0,0,0,0.98)");   // text area solid
       fadeGrd.addColorStop(1.0,  "rgba(0,0,0,0.99)");   // solid bottom
       ctx.fillStyle = fadeGrd; ctx.fillRect(0, 0, W, H);
 
